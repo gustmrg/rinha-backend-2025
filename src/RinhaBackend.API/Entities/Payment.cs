@@ -10,4 +10,5 @@ public class Payment
     public DateTime CreatedAt { get; set; }
     public DateTime? ProcessedAt { get; set; }
     public Guid CorrelationId { get; set; }
+    public string? ProcessorName { get; set; }
 }

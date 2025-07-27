@@ -18,7 +18,7 @@ public class PaymentRepository : IPaymentRepository
     public async Task CreatePaymentAsync(Payment payment)
     {
         const string sql = @"
-            INSERT INTO payments (id, amount, status, created_at, correlation_id)
+            INSERT INTO payments (payment_id, amount, status, created_at, correlation_id)
             VALUES (@Id, @Amount, @Status, @CreatedAt, @CorrelationId)";
         
         using var connection = _connectionFactory.CreateConnection();
@@ -46,6 +46,22 @@ public class PaymentRepository : IPaymentRepository
 
     public async Task UpdatePaymentAsync(Payment payment)
     {
-        throw new NotImplementedException();
+        const string sql = @"
+            UPDATE payments
+            SET status = @Status,
+                processed_at = @ProcessedAt
+            WHERE payment_id = @Id";
+        
+        using var connection = _connectionFactory.CreateConnection();
+
+        try
+        {
+            await connection.ExecuteAsync(sql, payment);
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e);
+            throw;
+        }
     }
 }
