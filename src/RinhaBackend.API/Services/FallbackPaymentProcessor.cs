@@ -7,6 +7,8 @@ public class FallbackPaymentProcessor : IPaymentProcessor
 {
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
+    
+    public string ProcessorName => "Fallback";
 
     public FallbackPaymentProcessor(HttpClient httpClient, IConfiguration configuration)
     {
@@ -29,7 +31,7 @@ public class FallbackPaymentProcessor : IPaymentProcessor
         _httpClient.Timeout = TimeSpan.FromSeconds(30);
     }
     
-    public async Task<bool> IsHealthyAsync()
+    public async Task<bool> IsHealthyAsync(CancellationToken cancellationToken = default)
     {
         try
         {
@@ -54,7 +56,7 @@ public class FallbackPaymentProcessor : IPaymentProcessor
         }
     }
 
-    public Task ProcessPaymentAsync(Payment payment)
+    public Task ProcessPaymentAsync(Payment payment, CancellationToken cancellationToken = default)
     {
         throw new NotImplementedException();
     }

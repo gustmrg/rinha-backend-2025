@@ -8,6 +8,8 @@ public class DefaultPaymentProcessor : IPaymentProcessor
 {
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
+    
+    public string ProcessorName => "Default";
 
     public DefaultPaymentProcessor(HttpClient httpClient, IConfiguration configuration)
     {
@@ -31,7 +33,7 @@ public class DefaultPaymentProcessor : IPaymentProcessor
     }
 
     // TODO: Validate timeout and retry policies
-    public async Task<bool> IsHealthyAsync()
+    public async Task<bool> IsHealthyAsync(CancellationToken cancellationToken = default)
     {
         try
         {
@@ -56,7 +58,7 @@ public class DefaultPaymentProcessor : IPaymentProcessor
         }
     }
 
-    public async Task ProcessPaymentAsync(Payment payment)
+    public async Task ProcessPaymentAsync(Payment payment, CancellationToken cancellationToken = default)
     {
         if (payment == null)
             throw new ArgumentNullException(nameof(payment));

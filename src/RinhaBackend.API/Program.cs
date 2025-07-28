@@ -1,9 +1,7 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http.Json;
-using RinhaBackend.API.DTOs.Requests;
-using RinhaBackend.API.Entities;
-using RinhaBackend.API.Enums;
 using RinhaBackend.API.Extensions;
+using RinhaBackend.API.Factories;
 using RinhaBackend.API.Interfaces;
 using RinhaBackend.API.Services;
 
@@ -23,10 +21,22 @@ builder.Services.Configure<JsonOptions>(options =>
 });
 
 builder.Services.AddHttpClient();
+builder.Services.AddMemoryCache();
 
+builder.Services.AddScoped<DefaultPaymentProcessor>();
+builder.Services.AddScoped<FallbackPaymentProcessor>();
+
+builder.Services.AddScoped<IPaymentProcessorFactory, PaymentProcessorFactory>();
+builder.Services.AddScoped<IProcessorHealthMonitor, ProcessorHealthMonitor>();
 builder.Services.AddScoped<IPaymentProcessor, DefaultPaymentProcessor>();
+builder.Services.AddScoped<IPaymentProcessor, FallbackPaymentProcessor>();
 
 builder.Services.AddOpenApi();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+    });;
 
 var app = builder.Build();
 
@@ -36,49 +46,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
-
-app.MapGet("/payments-summary", () => "Hello World!");
-
-app.MapPost("/payments", async (IPaymentRepository paymentRepository, IPaymentProcessor paymentProcessor, CreatePaymentRequest request) =>
-{
-    // Validate request
-    // Validate if correlation ID already exists
-    
-    var payment = new Payment
-    {
-        Id = Guid.CreateVersion7(),
-        Amount = request.Amount,
-        Status = PaymentStatus.Pending,
-        CreatedAt = DateTime.UtcNow,
-        CorrelationId = request.CorrelationId
-    };
-    
-    await paymentRepository.CreatePaymentAsync(payment);
-    
-    if (!await paymentProcessor.IsHealthyAsync())
-    {
-        return Results.BadRequest();
-    }
-    
-    try
-    {
-        await paymentProcessor.ProcessPaymentAsync(payment);
-        
-        payment.Status = PaymentStatus.Completed;
-        payment.ProcessedAt = DateTime.UtcNow;
-        await paymentRepository.UpdatePaymentAsync(payment);
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine(ex);
-    
-        payment.Status = PaymentStatus.Failed;
-        await paymentRepository.UpdatePaymentAsync(payment);
-        
-        return Results.Problem("Payment processing failed.");
-    }
-    
-    return Results.Ok();
-});
+// app.UseRouting();
+app.MapControllers();
 
 app.Run();

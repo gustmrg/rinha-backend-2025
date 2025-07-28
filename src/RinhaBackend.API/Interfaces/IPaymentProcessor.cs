@@ -4,6 +4,8 @@ namespace RinhaBackend.API.Interfaces;
 
 public interface IPaymentProcessor
 {
-    Task<bool> IsHealthyAsync();
-    Task ProcessPaymentAsync(Payment payment);
+    string ProcessorName { get; }
+    
+    Task<bool> IsHealthyAsync(CancellationToken cancellationToken = default);
+    Task ProcessPaymentAsync(Payment payment, CancellationToken cancellationToken = default);
 }

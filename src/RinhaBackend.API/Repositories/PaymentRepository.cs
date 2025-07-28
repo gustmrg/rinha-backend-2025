@@ -39,9 +39,23 @@ public class PaymentRepository : IPaymentRepository
         throw new NotImplementedException();
     }
 
-    public async Task<IEnumerable<Payment>> GetPaymentsByCorrelationIdAsync(Guid correlationId)
+    public async Task<Payment?> GetPaymentByCorrelationIdAsync(Guid correlationId)
     {
-        throw new NotImplementedException();
+        const string sql = @"
+            SELECT * FROM payments
+            WHERE correlation_id = @CorrelationId";
+        
+        using var connection = _connectionFactory.CreateConnection();
+        
+        try
+        {
+            return await connection.QueryFirstOrDefaultAsync<Payment>(sql, new { CorrelationId = correlationId });
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e);
+            throw;
+        }
     }
 
     public async Task UpdatePaymentAsync(Payment payment)
