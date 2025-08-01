@@ -7,29 +7,19 @@ namespace RinhaBackend.API.Services;
 public class DefaultPaymentProcessor : IPaymentProcessor
 {
     private readonly HttpClient _httpClient;
-    private readonly IConfiguration _configuration;
     
     public string ProcessorName => "Default";
 
-    public DefaultPaymentProcessor(HttpClient httpClient, IConfiguration configuration)
+    public DefaultPaymentProcessor(HttpClient httpClient)
     {
-        _httpClient = httpClient;
-        _configuration = configuration;
+        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         
-        ConfigureHttpClient();
-    }
-
-    private void ConfigureHttpClient()
-    {
-        var baseUrl = _configuration["Processors:Default:BaseUrl"];
-        
-        if (string.IsNullOrEmpty(baseUrl))
+        // HttpClient is now pre-configured in Program.cs via AddHttpClient<DefaultPaymentProcessor>
+        // Validate that base address is set
+        if (_httpClient.BaseAddress == null)
         {
-            throw new ArgumentNullException(nameof(baseUrl), "Base Url for Default Payment Processor is not configured.");
+            throw new InvalidOperationException("HttpClient BaseAddress is not configured for DefaultPaymentProcessor");
         }
-        
-        _httpClient.BaseAddress = new Uri(baseUrl);
-        _httpClient.Timeout = TimeSpan.FromSeconds(30);
     }
 
     // TODO: Validate timeout and retry policies
@@ -47,7 +37,7 @@ public class DefaultPaymentProcessor : IPaymentProcessor
 
             return true;
         }
-        catch (OperationCanceledException ex)
+        catch (OperationCanceledException)
         {
             throw;
         }

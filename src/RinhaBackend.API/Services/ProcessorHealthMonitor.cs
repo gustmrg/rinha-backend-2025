@@ -1,163 +1,236 @@
 using System.Diagnostics;
-using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Options;
+using System.Text.Json;
+using RinhaBackend.API.DTOs.Responses;
 using RinhaBackend.API.Entities;
+using RinhaBackend.API.Enums;
+using RinhaBackend.API.Services.Interfaces;
+using RinhaBackend.API.Extensions;
 using RinhaBackend.API.Interfaces;
 
 namespace RinhaBackend.API.Services;
 
 public class ProcessorHealthMonitor : IProcessorHealthMonitor
 {
-    private readonly IEnumerable<IPaymentProcessor> _processors;
-    private readonly IMemoryCache _cache;
-    private readonly IConfiguration _configuration;
+    private readonly ICacheService _cache;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<ProcessorHealthMonitor> _logger;
-    private readonly ProcessorSelectionConfiguration _config;
+    private readonly IConfiguration _configuration;
+    
+    private const string HEALTH_CACHE_KEY = "processors:health";
+    private static readonly TimeSpan CACHE_DURATION = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan HEALTH_CHECK_TIMEOUT = TimeSpan.FromSeconds(1);
+    
+    private readonly Dictionary<string, string> _processorUrls;
 
     public ProcessorHealthMonitor(
-        IEnumerable<IPaymentProcessor> processors, 
-        IMemoryCache cache, 
-        IConfiguration configuration, 
+        ICacheService cache, 
+        IHttpClientFactory httpClientFactory, 
         ILogger<ProcessorHealthMonitor> logger, 
-        IOptions<ProcessorSelectionConfiguration> config)
+        IConfiguration configuration)
     {
-        _processors = processors;
         _cache = cache;
-        _configuration = configuration;
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
-        _config = config.Value;
+        _configuration = configuration;
+        
+        _processorUrls = new Dictionary<string, string>
+        {
+            ["default"] = _configuration["PROCESSOR_DEFAULT_URL"] ?? "http://payment-processor-default:8080",
+            ["fallback"] = _configuration["PROCESSOR_FALLBACK_URL"] ?? "http://payment-processor-fallback:8080"
+        };
     }
-
-    public async Task<IEnumerable<ProcessorHealthInfo>> GetAllHealthInfosAsync(CancellationToken cancellationToken = default)
+    
+    public async Task<IEnumerable<ProcessorHealthInfo>> GetAllHealthInfosAsync()
     {
-        const string cacheKey = "all_processor_health_infos";
+        var cachedHealth = await _cache.GetAsync<ProcessorsHealthCache>(HEALTH_CACHE_KEY);
         
-        if (_cache.TryGetValue(cacheKey, out IEnumerable<ProcessorHealthInfo> cachedHealthInfos))
+        if (cachedHealth != null && cachedHealth.CacheAge < CACHE_DURATION)
         {
-            _logger.LogDebug("Cache hit for health infos for all processors");
-            return cachedHealthInfos;
+            _logger.LogDebug("Using cached processor health (age: {Age}s)", cachedHealth.CacheAge.TotalSeconds);
+            return cachedHealth.Processors;
         }
-
-        _logger.LogDebug("Cache miss for health infos, fetching updated data from processors");
         
-        var healthInfos = new List<ProcessorHealthInfo>();
-        var tasks = _processors.Select(async processor =>
+        _logger.LogDebug("Cache expired or missing, checking processor health");
+        var healthInfos = await CheckAllProcessorsHealthAsync();
+        
+        var cacheData = new ProcessorsHealthCache
         {
-            try
-            {
-                return await GetHealthInfoAsync(processor.ProcessorName, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error getting health info from processor {ProcessorName}", processor.ProcessorName);
-                return CreateUnhealthyInfo(processor.ProcessorName);
-            }
-        });
-        
-        var results = await Task.WhenAll(tasks);
-        healthInfos.AddRange(results);
-        
-        var cacheExpiration = TimeSpan.FromMinutes(_config.Cache.HealthCacheSeconds);
-        _cache.Set(cacheKey, healthInfos, cacheExpiration);
-        
-        _logger.LogInformation("Health check finished for {ProcessorCount} processors. Healthy: {HealthyCount}", 
-            healthInfos.Count, healthInfos.Count(h => h.IsHealthy));
-
+            Processors = healthInfos,
+            CachedAt = DateTime.UtcNow
+        };
+            
+        await _cache.TryAddAsync(HEALTH_CACHE_KEY, cacheData, CACHE_DURATION);
+            
         return healthInfos;
     }
 
-    public async Task<ProcessorHealthInfo> GetHealthInfoAsync(string processorName, CancellationToken cancellationToken = default)
+    public async Task<ProcessorHealthInfo> GetHealthInfoAsync(string processorName)
     {
-        var cacheKey = $"health_{processorName}";
-        
-        if (_cache.TryGetValue(cacheKey, out ProcessorHealthInfo cachedHealth))
-        {
-            return cachedHealth;
-        }
-        
-        var processor = _processors.FirstOrDefault(p => p.ProcessorName == processorName);
+        var allProcessors = await GetAllHealthInfosAsync();
+        return allProcessors.FirstOrDefault(p => p.ProcessorName.Equals(processorName, StringComparison.OrdinalIgnoreCase));
+    }
 
-        if (processor is null)
-        {
-            throw new ArgumentException($"Processor {processorName} not found");
-        }
+    public async Task<ProcessorHealthInfo> GetBestProcessorAsync()
+    {
+        var allProcessors = await GetAllHealthInfosAsync();
         
-        var healthInfo = await CheckProcessorHealthAsync(processor, cancellationToken);
+        // Estratégia de seleção por prioridade
+        var orderedProcessors = allProcessors
+            .OrderBy(p => GetProcessorPriority(p))
+            .ThenBy(p => p.ResponseTime)
+            .ToArray();
+
+        var selected = orderedProcessors.First();
         
-        var cacheExpiration = TimeSpan.FromSeconds(_config.Cache.HealthCacheSeconds);
-        _cache.Set(cacheKey, healthInfo, cacheExpiration);
-        
-        return healthInfo;
+        _logger.LogDebug("Selected processor {ProcessorName} with status {Status} (response time: {ResponseTime}ms)", 
+            selected.ProcessorName, selected.Status, selected.ResponseTime.TotalMilliseconds);
+            
+        return selected;
+    }
+
+    public async Task InvalidateCacheAsync()
+    {
+        await _cache.RemoveAsync(HEALTH_CACHE_KEY);
+        _logger.LogDebug("Processor health cache invalidated");
     }
     
-    private async Task<ProcessorHealthInfo> CheckProcessorHealthAsync(IPaymentProcessor processor, CancellationToken cancellationToken)
+    private async Task<ProcessorHealthInfo[]> CheckAllProcessorsHealthAsync()
+    {
+        _logger.LogDebug("Starting health check for {Count} processors", _processorUrls.Count);
+        
+        // Faz todos os checks em paralelo para máxima eficiência
+        var healthCheckTasks = _processorUrls.Select(kvp => 
+            CheckSingleProcessorHealthAsync(kvp.Key, kvp.Value)).ToArray();
+        
+        var results = await Task.WhenAll(healthCheckTasks);
+        
+        var healthyCount = results.Count(r => r.Status == ProcessorStatus.Healthy);
+        _logger.LogInformation("Health check completed: {Healthy}/{Total} processors healthy", 
+            healthyCount, results.Length);
+        
+        return results;
+    }
+    
+    private async Task<ProcessorHealthInfo> CheckSingleProcessorHealthAsync(string processorName, string baseUrl)
     {
         var stopwatch = Stopwatch.StartNew();
-        bool isHealthy = false;
-        
+        var healthInfo = new ProcessorHealthInfo
+        {
+            ProcessorName = processorName,
+            LastChecked = DateTime.UtcNow
+        };
+
         try
         {
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(TimeSpan.FromSeconds(5));
+            using var httpClient = _httpClientFactory.CreateClient();
+            httpClient.Timeout = HEALTH_CHECK_TIMEOUT;
             
-            isHealthy = await processor.IsHealthyAsync(timeoutCts.Token);
+            // Usa endpoint /health (padrão) ou /ping se disponível
+            var healthUrl = $"{baseUrl.TrimEnd('/')}/service-health";
+            
+            _logger.LogDebug("Checking health for {ProcessorName} at {Url}", processorName, healthUrl);
+            
+            using var response = await httpClient.GetAsync(healthUrl);
+            stopwatch.Stop();
+            
+            healthInfo.ResponseTime = stopwatch.Elapsed;
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                var result = JsonSerializer.Deserialize<ProcessorHealthCheckResponse>(content);
+
+                if (result!.Failing)
+                {
+                    healthInfo.Status = ProcessorStatus.Unhealthy;
+                }
+                else
+                {
+                    healthInfo.Status = healthInfo.ResponseTime.TotalMilliseconds switch
+                    {
+                        < 1000 => ProcessorStatus.Healthy,
+                        < 2000 => ProcessorStatus.Degraded,
+                        _ => ProcessorStatus.Unhealthy
+                    };
+                }
+                
+                _logger.LogDebug("Processor {ProcessorName} is {Status} (response time: {ResponseTime}ms)", 
+                    processorName, healthInfo.Status, healthInfo.ResponseTime.TotalMilliseconds);
+            }
+            else
+            {
+                healthInfo.Status = ProcessorStatus.Unhealthy;
+                healthInfo.ErrorMessage = $"HTTP {response.StatusCode}";
+                
+                _logger.LogWarning("Processor {ProcessorName} returned {StatusCode}", 
+                    processorName, response.StatusCode);
+            }
         }
-        catch (OperationCanceledException)
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            _logger.LogWarning("Health check timeout for {ProcessorName}", processor.ProcessorName);
+            stopwatch.Stop();
+            healthInfo.Status = ProcessorStatus.Unhealthy;
+            healthInfo.ResponseTime = HEALTH_CHECK_TIMEOUT;
+            healthInfo.ErrorMessage = "Timeout";
+            
+            _logger.LogWarning("Processor {ProcessorName} health check timed out", processorName);
+        }
+        catch (HttpRequestException ex)
+        {
+            stopwatch.Stop();
+            healthInfo.Status = ProcessorStatus.Unhealthy;
+            healthInfo.ResponseTime = stopwatch.Elapsed;
+            healthInfo.ErrorMessage = ex.Message;
+            
+            _logger.LogWarning(ex, "Processor {ProcessorName} health check failed", processorName);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Health check failed for {ProcessorName}", processor.ProcessorName);
+            stopwatch.Stop();
+            healthInfo.Status = ProcessorStatus.Unhealthy;
+            healthInfo.ResponseTime = stopwatch.Elapsed;
+            healthInfo.ErrorMessage = ex.Message;
+            
+            _logger.LogError(ex, "Unexpected error checking processor {ProcessorName}", processorName);
         }
-        
-        stopwatch.Stop();
-        
-        var processorConfig = _config.Processors.GetValueOrDefault(processor.ProcessorName, new ProcessorConfig());
-        
-        return new ProcessorHealthInfo
-        {
-            ProcessorName = processor.ProcessorName,
-            IsHealthy = isHealthy && processorConfig.Enabled,
-            ResponseTime = stopwatch.Elapsed,
-            LastChecked = DateTime.UtcNow,
-            SuccessRate = await GetSuccessRate(processor.ProcessorName),
-            Priority = processorConfig.Priority,
-            Metadata = new Dictionary<string, object>
-            {
-                ["enabled"] = processorConfig.Enabled,
-                ["health_check_duration_ms"] = stopwatch.ElapsedMilliseconds
-            }
-        };
+
+        return healthInfo;
     }
     
-    private ProcessorHealthInfo CreateUnhealthyInfo(string processorName)
+    private static int GetProcessorPriority(ProcessorHealthInfo processor)
     {
-        var processorConfig = _config.Processors.GetValueOrDefault(processorName, new ProcessorConfig());
+        // Prioridade de seleção (menor número = maior prioridade)
+        var basePriority = processor.ProcessorName.ToLower() switch
+        {
+            "default" => 1,    // Default tem prioridade
+            "fallback" => 2,   // Fallback é segunda opção
+            _ => 3             // Outros processadores
+        };
+
+        // Ajusta prioridade baseado no status
+        var statusPenalty = processor.Status switch
+        {
+            ProcessorStatus.Healthy => 0,
+            ProcessorStatus.Degraded => 10,
+            ProcessorStatus.Unhealthy => 20,
+            ProcessorStatus.Unknown => 15,
+            _ => 25
+        };
+
+        return basePriority + statusPenalty;
+    }
+    
+    private ProcessorHealthInfo[] GetDefaultHealthInfos()
+    {
+        _logger.LogWarning("Using default health infos (assuming all processors healthy)");
         
-        return new ProcessorHealthInfo
+        return _processorUrls.Keys.Select(processorName => new ProcessorHealthInfo
         {
             ProcessorName = processorName,
-            IsHealthy = false,
-            ResponseTime = TimeSpan.FromSeconds(30), // Penalty time
+            Status = ProcessorStatus.Healthy,
+            ResponseTime = TimeSpan.FromMilliseconds(100), // Assume 100ms
             LastChecked = DateTime.UtcNow,
-            SuccessRate = 0,
-            Priority = processorConfig.Priority
-        };
-    }
-    
-    private async Task<double> GetSuccessRate(string processorName)
-    {
-        // TODO: Implementar busca no banco de dados das últimas transações
-        // Por enquanto, retornando valores simulados baseados no processador
-        
-        await Task.Delay(1); // Simular async call
-        
-        return processorName switch
-        {
-            "Default" => 0.96,
-            "Fallback" => 0.94,
-            _ => 0.90
-        };
+            ErrorMessage = "Default assumption"
+        }).ToArray();
     }
 }

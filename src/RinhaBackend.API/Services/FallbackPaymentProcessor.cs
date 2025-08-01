@@ -6,29 +6,19 @@ namespace RinhaBackend.API.Services;
 public class FallbackPaymentProcessor : IPaymentProcessor
 {
     private readonly HttpClient _httpClient;
-    private readonly IConfiguration _configuration;
     
     public string ProcessorName => "Fallback";
 
-    public FallbackPaymentProcessor(HttpClient httpClient, IConfiguration configuration)
+    public FallbackPaymentProcessor(HttpClient httpClient)
     {
-        _httpClient = httpClient;
-        _configuration = configuration;
+        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         
-        ConfigureHttpClient();
-    }
-
-    private void ConfigureHttpClient()
-    {
-        var baseUrl = _configuration["Processors:Fallback:BaseUrl"];
-        
-        if (string.IsNullOrEmpty(baseUrl))
+        // HttpClient is now pre-configured in Program.cs via AddHttpClient<FallbackPaymentProcessor>
+        // Validate that base address is set
+        if (_httpClient.BaseAddress == null)
         {
-            throw new ArgumentNullException(nameof(baseUrl), "Base Url for Fallback Payment Processor is not configured.");
+            throw new InvalidOperationException("HttpClient BaseAddress is not configured for FallbackPaymentProcessor");
         }
-        
-        _httpClient.BaseAddress = new Uri(baseUrl);
-        _httpClient.Timeout = TimeSpan.FromSeconds(30);
     }
     
     public async Task<bool> IsHealthyAsync(CancellationToken cancellationToken = default)
@@ -45,7 +35,7 @@ public class FallbackPaymentProcessor : IPaymentProcessor
 
             return true;
         }
-        catch (OperationCanceledException ex)
+        catch (OperationCanceledException)
         {
             throw;
         }
