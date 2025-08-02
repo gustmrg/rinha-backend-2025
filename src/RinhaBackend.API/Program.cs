@@ -53,7 +53,6 @@ builder.Services.AddScoped<DefaultPaymentProcessor>();
 builder.Services.AddScoped<FallbackPaymentProcessor>();
 
 builder.Services.AddScoped<IPaymentProcessorFactory, PaymentProcessorFactory>();
-builder.Services.AddScoped<IProcessorHealthMonitor, ProcessorHealthMonitor>();
 builder.Services.AddScoped<IPaymentProcessor, DefaultPaymentProcessor>();
 builder.Services.AddScoped<IPaymentProcessor, FallbackPaymentProcessor>();
 builder.Services.AddScoped<PaymentProcessingService>();
@@ -80,7 +79,7 @@ app.MapPost("payments", async (
     [FromServices] IBackgroundTaskQueue backgroundTaskQueue,
     [FromServices] PaymentProcessingService paymentProcessingService,
     [FromServices] IPaymentRepository paymentRepository,
-    [FromServices] ILogger logger,
+    [FromServices] ILogger<Program> logger,
     [FromBody] CreatePaymentRequest request) =>
 {
     var payment = new Payment

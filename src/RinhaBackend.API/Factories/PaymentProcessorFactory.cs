@@ -16,8 +16,8 @@ public class PaymentProcessorFactory : IPaymentProcessorFactory
     {
         return processorName switch
         {
-            "Default" => _serviceProvider.GetRequiredService<DefaultPaymentProcessor>(),
-            "Fallback" => _serviceProvider.GetRequiredService<FallbackPaymentProcessor>(),
+            "default" => _serviceProvider.GetRequiredService<DefaultPaymentProcessor>(),
+            "fallback" => _serviceProvider.GetRequiredService<FallbackPaymentProcessor>(),
             _ => throw new ArgumentException($"Unknown processor name: {processorName}", nameof(processorName))
         };
     }
