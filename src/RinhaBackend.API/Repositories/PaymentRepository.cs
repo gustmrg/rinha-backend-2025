@@ -1,7 +1,9 @@
 using Dapper;
 using Npgsql;
 using RinhaBackend.API.DTOs.Requests;
+using RinhaBackend.API.DTOs.Responses;
 using RinhaBackend.API.Entities;
+using RinhaBackend.API.Enums;
 using RinhaBackend.API.Interfaces;
 
 namespace RinhaBackend.API.Repositories;
@@ -22,8 +24,8 @@ public class PaymentRepository : IPaymentRepository
     public async Task CreatePaymentAsync(Payment payment)
     {
         const string sql = @"
-            INSERT INTO payments (payment_id, amount, status, created_at, correlation_id)
-            VALUES (@Id, @Amount, @Status, @CreatedAt, @CorrelationId)";
+            INSERT INTO payments (payment_id, amount, status, requested_at, correlation_id)
+            VALUES (@Id, @Amount, @Status, @RequestedAt, @CorrelationId)";
         
         using var connection = _connectionFactory.CreateConnection();
 
@@ -41,12 +43,11 @@ public class PaymentRepository : IPaymentRepository
     public async Task<IEnumerable<Payment>> GetPaymentsAsync(DateTime from, DateTime to)
     {
         const string sql = @"
-            SELECT payment_id as Id, amount, status, created_at as CreatedAt, 
-                   processed_at as ProcessedAt, correlation_id as CorrelationId, 
-                   processor_name as ProcessorName
+            SELECT payment_id as Id, amount, status, requested_at as RequestedAt, 
+                   correlation_id as CorrelationId, processor_name as ProcessorName
             FROM payments
-            WHERE (@From IS NULL OR created_at >= @From)
-              AND (@To IS NULL OR created_at <= @To)";
+            WHERE (@From IS NULL OR requested_at >= @From)
+              AND (@To IS NULL OR requested_at <= @To)";
         
         using var connection = _connectionFactory.CreateConnection();
 
@@ -69,11 +70,11 @@ public class PaymentRepository : IPaymentRepository
     public async Task<Payment?> GetPaymentByIdAsync(Guid paymentId)
     {
         const string sql = @"
-            SELECT payment_id as Id, amount, status, created_at as CreatedAt, 
-                   processed_at as ProcessedAt, correlation_id as CorrelationId, 
-                   processor_name as ProcessorName
+            SELECT payment_id as Id, amount, status, requested_at as RequestedAt, 
+                   correlation_id as CorrelationId, processor_name as ProcessorName
             FROM payments 
-            WHERE payment_id = @Id";
+            WHERE payment_id = @Id
+            LIMIT 1";
         
         using var connection = _connectionFactory.CreateConnection();
 
@@ -112,7 +113,6 @@ public class PaymentRepository : IPaymentRepository
         const string sql = @"
             UPDATE payments
             SET status = @Status,
-                processed_at = @ProcessedAt,
                 processor_name = @ProcessorName
             WHERE payment_id = @Id";
         
@@ -121,6 +121,82 @@ public class PaymentRepository : IPaymentRepository
         try
         {
             await connection.ExecuteAsync(sql, payment);
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e);
+            throw;
+        }
+    }
+
+    public async Task<PaymentsSummaryResponse> GetPaymentsSummaryAsync(DateTime from, DateTime to)
+    {
+        const string sql = @"
+            SELECT 
+                COALESCE(processor_name, 0) as ProcessorName,
+                COUNT(*) as TotalRequests,
+                COALESCE(SUM(amount), 0) as TotalAmount
+            FROM payments
+            WHERE (@From IS NULL OR requested_at >= @From)
+              AND (@To IS NULL OR requested_at <= @To)
+            GROUP BY processor_name";
+        
+        using var connection = _connectionFactory.CreateConnection();
+
+        try
+        {
+            var results = await connection.QueryAsync(sql, new { From = from, To = to });
+            
+            var defaultSummary = new PaymentSummary(0, 0);
+            var fallbackSummary = new PaymentSummary(0, 0);
+            
+            foreach (var result in results)
+            {
+                var processorName = (int?)result.ProcessorName;
+                var totalRequests = (int)result.TotalRequests;
+                var totalAmount = (decimal)result.TotalAmount;
+                
+                if (processorName == (int)PaymentProcessor.Default)
+                {
+                    defaultSummary = new PaymentSummary(totalRequests, totalAmount);
+                }
+                else if (processorName == (int)PaymentProcessor.Fallback)
+                {
+                    fallbackSummary = new PaymentSummary(totalRequests, totalAmount);
+                }
+            }
+            
+            return new PaymentsSummaryResponse
+            {
+                Default = defaultSummary,
+                Fallback = fallbackSummary
+            };
+        }
+        catch (NpgsqlException ex) when (ex.Message.Contains("timeout"))
+        {
+            _logger.LogError(ex, "Database timeout occurred during GetPaymentsSummaryAsync");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error during GetPaymentsSummaryAsync");
+            throw;
+        }
+    }
+
+    public Task<bool> PaymentExistsAsync(Guid correlationId)
+    {
+        const string sql = @"
+            SELECT EXISTS (
+                SELECT 1 FROM payments 
+                WHERE correlation_id = @CorrelationId
+            )";
+        
+        using var connection = _connectionFactory.CreateConnection();
+        
+        try
+        {
+            return connection.ExecuteScalarAsync<bool>(sql, new { CorrelationId = correlationId });
         }
         catch (Exception e)
         {

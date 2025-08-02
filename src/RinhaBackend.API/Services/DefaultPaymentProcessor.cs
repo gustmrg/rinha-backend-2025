@@ -8,17 +8,17 @@ public class DefaultPaymentProcessor : IPaymentProcessor
 {
     private readonly HttpClient _httpClient;
     
-    public string ProcessorName => "Default";
+    public string ProcessorName => "default";
 
     public DefaultPaymentProcessor(HttpClient httpClient)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         
-        // HttpClient is now pre-configured in Program.cs via AddHttpClient<DefaultPaymentProcessor>
-        // Validate that base address is set
         if (_httpClient.BaseAddress == null)
         {
-            throw new InvalidOperationException("HttpClient BaseAddress is not configured for DefaultPaymentProcessor");
+            throw new InvalidOperationException(
+                "HttpClient BaseAddress is not configured for DefaultPaymentProcessor. " +
+                "Check PROCESSOR_DEFAULT_URL environment variable or Processors:Default:BaseUrl in appsettings.json");
         }
     }
 
@@ -55,7 +55,7 @@ public class DefaultPaymentProcessor : IPaymentProcessor
         
         try
         {
-            var request = new PaymentProcessorRequest(payment.CorrelationId, payment.Amount, payment.CreatedAt);
+            var request = new PaymentProcessorRequest(payment.CorrelationId, payment.Amount, payment.RequestedAt);
             
             var result = await _httpClient.PostAsJsonAsync("payments", request);
             

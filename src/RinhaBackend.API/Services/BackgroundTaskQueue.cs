@@ -5,7 +5,7 @@ namespace RinhaBackend.API.Services;
 
 public class BackgroundTaskQueue : IBackgroundTaskQueue
 {
-    private readonly Channel<Func<CancellationToken, ValueTask>> _queue;
+    private readonly Channel<Func<CancellationToken, IServiceProvider, ValueTask>> _queue;
     
     public BackgroundTaskQueue(int capacity = 1000)
     {
@@ -14,10 +14,10 @@ public class BackgroundTaskQueue : IBackgroundTaskQueue
             FullMode = BoundedChannelFullMode.Wait
         };
         
-        _queue = Channel.CreateBounded<Func<CancellationToken, ValueTask>>(options);
+        _queue = Channel.CreateBounded<Func<CancellationToken, IServiceProvider, ValueTask>>(options);
     }
     
-    public async ValueTask QueueBackgroundWorkItemAsync(Func<CancellationToken, ValueTask> workItem)
+    public async ValueTask QueueBackgroundWorkItemAsync(Func<CancellationToken, IServiceProvider, ValueTask> workItem)
     {
         if (workItem == null)
         {
@@ -27,7 +27,7 @@ public class BackgroundTaskQueue : IBackgroundTaskQueue
         await _queue.Writer.WriteAsync(workItem);
     }
 
-    public async ValueTask<Func<CancellationToken, ValueTask>> DequeueAsync(CancellationToken cancellationToken)
+    public async ValueTask<Func<CancellationToken, IServiceProvider, ValueTask>> DequeueAsync(CancellationToken cancellationToken)
     {
         var workItem = await _queue.Reader.ReadAsync(cancellationToken);
         return workItem;

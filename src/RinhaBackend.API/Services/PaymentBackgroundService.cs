@@ -40,8 +40,10 @@ public sealed class PaymentBackgroundService : BackgroundService
             {
                 var workItem =  await _taskQueue.DequeueAsync(stoppingToken);
                 
+                _logger.LogInformation("Processing background work item");
+                
                 using var scope = _serviceProvider.CreateScope();
-                await workItem(stoppingToken);
+                await workItem(stoppingToken, scope.ServiceProvider);
             }
             catch (OperationCanceledException)
             {

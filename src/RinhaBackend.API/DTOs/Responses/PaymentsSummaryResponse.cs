@@ -6,4 +6,14 @@ public class PaymentsSummaryResponse
     public PaymentSummary Fallback { get; set; }
 }
 
-public class PaymentSummary(int TotalRequests, decimal TotalAmount);
+public class PaymentSummary
+{
+    public int TotalRequests { get; }
+    public decimal TotalAmount { get; }
+    
+    public PaymentSummary(int totalRequests, decimal totalAmount)
+    {
+        TotalRequests = totalRequests;
+        TotalAmount = totalAmount;
+    }
+}

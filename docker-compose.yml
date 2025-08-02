@@ -10,11 +10,11 @@ services:
       - DB_USER=rinha
       - DB_PASSWORD=rinha
       - DB_NAME=rinha
-      - DB_MAX_POOL_SIZE=20     
-      - DB_MIN_POOL_SIZE=5     
-      - DB_CONNECTION_TIMEOUT=15 
-      - DB_COMMAND_TIMEOUT=10    
-      - DB_CONNECTION_IDLE_LIFETIME=300
+      - DB_MAX_POOL_SIZE=30         
+      - DB_MIN_POOL_SIZE=10         
+      - DB_CONNECTION_TIMEOUT=10    
+      - DB_COMMAND_TIMEOUT=8        
+      - DB_CONNECTION_IDLE_LIFETIME=180 
       - PROCESSOR_DEFAULT_URL=http://payment-processor-default:8080
       - PROCESSOR_FALLBACK_URL=http://payment-processor-fallback:8080
     networks:
@@ -23,11 +23,11 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          cpus: "0.35"
-          memory: "80MB"
+#    deploy:
+#      resources:
+#        limits:
+#          cpus: "0.6"
+#          memory: "115MB"
 
   api02:
     <<: *api
@@ -76,8 +76,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.65"
-          memory: "175MB"
+          cpus: "0.25"
+          memory: "110MB"
+        reservations: 
+          cpus: "0.1"
+          memory: "80MB"
 
   nginx:
     image: nginx:1.27.0-alpine
@@ -95,8 +98,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.15"
-          memory: "15MB"
+          cpus: "0.05"
+          memory: "10MB"
 
 networks:
   payment-processor:

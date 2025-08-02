@@ -13,15 +13,18 @@ public class PaymentProcessingService
     private readonly IPaymentProcessorFactory _paymentProcessorFactory;
     private readonly ILogger<PaymentProcessingService> _logger;
     private readonly IAsyncPolicy<HttpResponseMessage> _fallbackPolicy;
+    private readonly PaymentDuplicateService _duplicateService;
 
     public PaymentProcessingService(
         IPaymentRepository paymentRepository, 
         IPaymentProcessorFactory paymentProcessorFactory, 
-        ILogger<PaymentProcessingService> logger)
+        ILogger<PaymentProcessingService> logger, 
+        PaymentDuplicateService duplicateService)
     {
         _paymentRepository = paymentRepository;
         _paymentProcessorFactory = paymentProcessorFactory;
         _logger = logger;
+        _duplicateService = duplicateService;
         _fallbackPolicy = CreateFallbackPolicy();
     }
 
@@ -36,6 +39,14 @@ public class PaymentProcessingService
             if (payment == null)
             {
                 _logger.LogWarning("Payment {PaymentId} not found", paymentId);
+                return;
+            }
+            
+            var paymentExists = await _duplicateService.PaymentExistsAsync(payment.CorrelationId);
+
+            if (paymentExists)
+            {
+                _logger.LogWarning("Payment {PaymentId} already exists", paymentId);
                 return;
             }
         
@@ -65,6 +76,7 @@ public class PaymentProcessingService
         try
         {
             payment.Status = status;
+ 
             await _paymentRepository.UpdatePaymentAsync(payment);
         }
         catch (Exception ex)
@@ -86,7 +98,6 @@ public class PaymentProcessingService
             var paymentProcessor = _paymentProcessorFactory.Create("default");
             await paymentProcessor.ProcessPaymentAsync(payment);
             
-            payment.ProcessedAt = DateTime.UtcNow;
             payment.ProcessorName = PaymentProcessor.Default;
             
             await UpdatePaymentStatus(payment, PaymentStatus.Completed);
@@ -106,7 +117,6 @@ public class PaymentProcessingService
         var fallbackProcessor = _paymentProcessorFactory.Create("fallback");
         await fallbackProcessor.ProcessPaymentAsync(payment);
         
-        payment.ProcessedAt = DateTime.UtcNow;
         payment.ProcessorName = PaymentProcessor.Fallback;
         
         await UpdatePaymentStatus(payment, PaymentStatus.Completed);

@@ -8,7 +8,7 @@ public class FallbackPaymentProcessor : IPaymentProcessor
 {
     private readonly HttpClient _httpClient;
     
-    public string ProcessorName => "Fallback";
+    public string ProcessorName => "fallback";
 
     public FallbackPaymentProcessor(HttpClient httpClient)
     {
@@ -54,7 +54,7 @@ public class FallbackPaymentProcessor : IPaymentProcessor
         
         try
         {
-            var request = new PaymentProcessorRequest(payment.CorrelationId, payment.Amount, payment.CreatedAt);
+            var request = new PaymentProcessorRequest(payment.CorrelationId, payment.Amount, payment.RequestedAt);
             
             var result = await _httpClient.PostAsJsonAsync("payments", request);
             

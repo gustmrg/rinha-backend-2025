@@ -30,18 +30,8 @@ public class PaymentsController : ControllerBase
             return Ok(cachedResponse);
         }
         
-        // Cache miss - fetch from database
-        var payments = await paymentRepository.GetPaymentsAsync(from, to);
-        
-        // Group payments by processor to avoid multiple enumeration
-        var defaultPayments = payments.Where(x => x.ProcessorName == PaymentProcessor.Default).ToList();
-        var fallbackPayments = payments.Where(x => x.ProcessorName == PaymentProcessor.Fallback).ToList();
-        
-        var response = new PaymentsSummaryResponse
-        {
-            Default = new PaymentSummary(defaultPayments.Count, defaultPayments.Sum(x => x.Amount)),
-            Fallback = new PaymentSummary(fallbackPayments.Count, fallbackPayments.Sum(x => x.Amount)),
-        };
+        // Cache miss - fetch summary from database
+        var response = await paymentRepository.GetPaymentsSummaryAsync(from, to);
         
         // Cache the response with shorter TTL for recent data, longer for older data
         var cacheExpiration = CalculateCacheExpiration(from, to);
@@ -92,7 +82,7 @@ public class PaymentsController : ControllerBase
                 Id = Guid.CreateVersion7(),
                 Amount = request.Amount,
                 Status = PaymentStatus.Pending,
-                CreatedAt = DateTime.UtcNow,
+                RequestedAt = DateTime.UtcNow,
                 CorrelationId = request.CorrelationId
             };
 
@@ -102,10 +92,12 @@ public class PaymentsController : ControllerBase
             
                 await cache.TryAddAsync(CacheKeys.Payment(payment.Id), payment, TimeSpan.FromMinutes(30));
 
-                await backgroundTaskQueue.QueueBackgroundWorkItemAsync(async token =>
+                await backgroundTaskQueue.QueueBackgroundWorkItemAsync(async (token, serviceProvider) =>
                 {
-                    await paymentProcessingService.ProcessPendingPaymentAsync(payment.Id);
-                    await cache.InvalidatePaymentsSummaryAsync();
+                    var paymentService = serviceProvider.GetRequiredService<PaymentProcessingService>();
+                    var cacheService = serviceProvider.GetRequiredService<ICacheService>();
+                    await paymentService.ProcessPendingPaymentAsync(payment.Id);
+                    await cacheService.InvalidatePaymentsSummaryAsync();
                 });
                 
                 return Accepted(new { 
