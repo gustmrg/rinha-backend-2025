@@ -24,7 +24,7 @@ public class PaymentProcessingService
         _logger = logger;
     }
 
-    public async ValueTask ProcessPendingPaymentAsync(Guid paymentId, CancellationToken cancellationToken = default)
+    public async ValueTask ProcessPendingPaymentAsync(Guid paymentId)
     {
         try
         {
@@ -59,7 +59,7 @@ public class PaymentProcessingService
             
             var paymentProcessor = _paymentProcessorFactory.Create(bestProcessor.ProcessorName);
         
-            await paymentProcessor.ProcessPaymentAsync(payment, cancellationToken);
+            await paymentProcessor.ProcessPaymentAsync(payment);
         
             payment.ProcessedAt = DateTime.UtcNow;
             payment.ProcessorName = GetPaymentProcessorByName(bestProcessor.ProcessorName);

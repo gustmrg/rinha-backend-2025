@@ -4,8 +4,6 @@ using RinhaBackend.API.DTOs.Responses;
 using RinhaBackend.API.Entities;
 using RinhaBackend.API.Enums;
 using RinhaBackend.API.Services.Interfaces;
-using RinhaBackend.API.Extensions;
-using RinhaBackend.API.Interfaces;
 
 namespace RinhaBackend.API.Services;
 

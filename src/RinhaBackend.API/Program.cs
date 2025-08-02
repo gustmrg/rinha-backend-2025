@@ -1,11 +1,15 @@
 using System.Text.Json;
-using Microsoft.AspNetCore.Http.Json;
+using Microsoft.AspNetCore.Mvc;
+using RinhaBackend.API.DTOs.Requests;
+using RinhaBackend.API.DTOs.Responses;
+using RinhaBackend.API.Entities;
+using RinhaBackend.API.Enums;
 using RinhaBackend.API.Extensions;
 using RinhaBackend.API.Factories;
 using RinhaBackend.API.Interfaces;
 using RinhaBackend.API.Services;
 using RinhaBackend.API.Services.Interfaces;
-using StackExchange.Redis;
+using JsonOptions = Microsoft.AspNetCore.Http.Json.JsonOptions;
 
 var builder = WebApplication.CreateBuilder(args);
 var configuration = builder.Configuration;
@@ -43,23 +47,6 @@ builder.Services.AddHttpClient<FallbackPaymentProcessor>("FallbackProcessor", cl
     client.Timeout = TimeSpan.FromSeconds(30);
 });
 
-builder.Services.AddMemoryCache();
-
-var redisConnectionString = builder.Configuration["REDIS_CONNECTION_STRING"] 
-                            ?? builder.Configuration.GetConnectionString("Redis") 
-                            ?? "localhost:6379";
-
-builder.Services.AddSingleton<IConnectionMultiplexer>(provider =>
-{
-    var configuration = ConfigurationOptions.Parse(redisConnectionString);
-    configuration.AbortOnConnectFail = false;
-    configuration.ConnectTimeout = 5000;  
-    configuration.SyncTimeout = 1000;
-    return ConnectionMultiplexer.Connect(configuration);
-});
-
-
-builder.Services.AddSingleton<ICacheService, RedisCacheService>();
 builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
 
 builder.Services.AddScoped<DefaultPaymentProcessor>();
@@ -89,6 +76,56 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-app.MapControllers();
+app.MapPost("payments", async (
+    [FromServices] IBackgroundTaskQueue backgroundTaskQueue,
+    [FromServices] PaymentProcessingService paymentProcessingService,
+    [FromServices] IPaymentRepository paymentRepository,
+    [FromServices] ILogger logger,
+    [FromBody] CreatePaymentRequest request) =>
+{
+    var payment = new Payment
+    {
+        Id = Guid.CreateVersion7(),
+        Amount = request.Amount,
+        Status = PaymentStatus.Pending,
+        CreatedAt = DateTime.UtcNow,
+        CorrelationId = request.CorrelationId
+    };
+
+    try
+    {
+        await paymentRepository.CreatePaymentAsync(payment);
+    
+        await backgroundTaskQueue.QueueBackgroundWorkItemAsync(async token =>
+        {
+            await paymentProcessingService.ProcessPendingPaymentAsync(payment.Id);
+        });
+ 
+        return Results.Accepted();
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Failed to create payment for correlation {CorrelationId}", request.CorrelationId);
+        return Results.InternalServerError(new { error = "Failed to create payment" });
+    }
+});
+
+app.MapGet("/payments-summary", async (
+    [FromServices] IPaymentRepository paymentRepository,
+    [FromQuery] DateTime from, DateTime to) =>
+{
+    var payments = await paymentRepository.GetPaymentsAsync(from, to);
+    
+    var defaultPayments = payments.Where(x => x.ProcessorName == PaymentProcessor.Default).ToList();
+    var fallbackPayments = payments.Where(x => x.ProcessorName == PaymentProcessor.Fallback).ToList();
+    
+    var response = new PaymentsSummaryResponse
+    {
+        Default = new PaymentSummary(defaultPayments.Count, defaultPayments.Sum(x => x.Amount)),
+        Fallback = new PaymentSummary(fallbackPayments.Count, fallbackPayments.Sum(x => x.Amount)),
+    };
+    
+    return Results.Ok(response);
+});
 
 app.Run();

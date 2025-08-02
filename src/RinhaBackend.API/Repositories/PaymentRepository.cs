@@ -45,9 +45,8 @@ public class PaymentRepository : IPaymentRepository
                    processed_at as ProcessedAt, correlation_id as CorrelationId, 
                    processor_name as ProcessorName
             FROM payments
-            WHERE (@From IS NULL OR processed_at >= @From)
-              AND (@To IS NULL OR processed_at <= @To)
-            ORDER BY created_at DESC";
+            WHERE (@From IS NULL OR created_at >= @From)
+              AND (@To IS NULL OR created_at <= @To)";
         
         using var connection = _connectionFactory.CreateConnection();
 

@@ -55,7 +55,7 @@ public class DefaultPaymentProcessor : IPaymentProcessor
         
         try
         {
-            var request = new PaymentProcessorRequest(payment.CorrelationId, payment.Amount, DateTime.UtcNow);
+            var request = new PaymentProcessorRequest(payment.CorrelationId, payment.Amount, payment.CreatedAt);
             
             var result = await _httpClient.PostAsJsonAsync("payments", request);
             

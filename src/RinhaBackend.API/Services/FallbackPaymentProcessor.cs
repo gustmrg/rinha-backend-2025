@@ -1,3 +1,4 @@
+using RinhaBackend.API.DTOs.Requests;
 using RinhaBackend.API.Entities;
 using RinhaBackend.API.Interfaces;
 
@@ -46,8 +47,37 @@ public class FallbackPaymentProcessor : IPaymentProcessor
         }
     }
 
-    public Task ProcessPaymentAsync(Payment payment, CancellationToken cancellationToken = default)
+    public async Task ProcessPaymentAsync(Payment payment, CancellationToken cancellationToken = default)
     {
-        throw new NotImplementedException();
+        if (payment == null)
+            throw new ArgumentNullException(nameof(payment));
+        
+        try
+        {
+            var request = new PaymentProcessorRequest(payment.CorrelationId, payment.Amount, payment.CreatedAt);
+            
+            var result = await _httpClient.PostAsJsonAsync("payments", request);
+            
+            var responseContent = await result.Content.ReadAsStringAsync();
+            Console.WriteLine(responseContent);
+            
+            if (!result.IsSuccessStatusCode)
+            {
+                Console.WriteLine($"Payment processing failed with status code: {result.StatusCode}");
+                Console.WriteLine($"Response content: {responseContent}");
+                throw new HttpRequestException($"Payment processing failed with status {result.StatusCode}: {responseContent}");
+            }
+            
+            Console.WriteLine($"Payment processed successfully for CorrelationId: {payment.CorrelationId}");
+        }
+        catch (HttpRequestException)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"Unexpected error processing payment: {e}");
+            throw;
+        }
     }
 }

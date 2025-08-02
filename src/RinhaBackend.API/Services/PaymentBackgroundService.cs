@@ -2,7 +2,7 @@ using RinhaBackend.API.Services.Interfaces;
 
 namespace RinhaBackend.API.Services;
 
-public class PaymentBackgroundService : BackgroundService
+public sealed class PaymentBackgroundService : BackgroundService
 {
     private readonly IBackgroundTaskQueue _taskQueue;
     private readonly IServiceProvider _serviceProvider;
@@ -22,16 +22,17 @@ public class PaymentBackgroundService : BackgroundService
     {
         _logger.LogInformation("Payment Background Service started");
 
-        await BackgroundProcessing(stoppingToken);
+        await ProcessTaskQueueAsync(stoppingToken);
     }
     
     public override async Task StopAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("Payment Background Service is stopping");
+        
         await base.StopAsync(stoppingToken);
     }
     
-    private async Task BackgroundProcessing(CancellationToken stoppingToken)
+    private async Task ProcessTaskQueueAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
         {

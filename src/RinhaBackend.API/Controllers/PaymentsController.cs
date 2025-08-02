@@ -102,13 +102,10 @@ public class PaymentsController : ControllerBase
             
                 await cache.TryAddAsync(CacheKeys.Payment(payment.Id), payment, TimeSpan.FromMinutes(30));
 
-                _ = Task.Run(async () =>
+                await backgroundTaskQueue.QueueBackgroundWorkItemAsync(async token =>
                 {
-                    await backgroundTaskQueue.QueueBackgroundWorkItemAsync(async token =>
-                    {
-                        await paymentProcessingService.ProcessPendingPaymentAsync(payment.Id, token);
-                        await cache.InvalidatePaymentsSummaryAsync();
-                    });
+                    await paymentProcessingService.ProcessPendingPaymentAsync(payment.Id);
+                    await cache.InvalidatePaymentsSummaryAsync();
                 });
                 
                 return Accepted(new { 
