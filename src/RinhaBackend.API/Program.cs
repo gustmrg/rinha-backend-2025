@@ -21,8 +21,21 @@ builder.Services.AddRedis(builder.Configuration);
 
 var app = builder.Build();
 
-app.MapPost("payments", (
-    [FromServices] ICacheService cache, 
-    [FromBody] CreatePaymentRequest request) => "Hello World!");
+app.MapPost("payments", async (
+    [FromServices] ICacheService cache,
+    [FromBody] CreatePaymentRequest request) =>
+{
+    if (await cache.ExistsAsync($"payment:{request.CorrelationId}"))
+    {
+        return Results.Conflict("Payment with this correlation ID already exists.");
+    }
+    
+    await cache.TryAddAsync(
+        $"payment:{request.CorrelationId}",
+        request,
+        TimeSpan.FromMinutes(5));
+
+    return Results.Accepted();
+});
 
 app.Run();
