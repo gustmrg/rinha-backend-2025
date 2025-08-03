@@ -16,14 +16,14 @@ public class PaymentDuplicateService
     
     public async Task<bool> PaymentExistsAsync(Guid correlationId)
     {
-        if (_localCache.TryGetValue($"payment_corr:{correlationId}", out _))
+        if (_localCache.TryGetValue($"payment:{correlationId}", out _))
             return true;
         
         var exists = await _repository.PaymentExistsAsync(correlationId);
         
         if (exists)
         {
-            _localCache.Set($"payment_corr:{correlationId}", true, TimeSpan.FromMinutes(10));
+            _localCache.Set($"payment:{correlationId}", true, TimeSpan.FromMinutes(10));
         }
         
         return exists;

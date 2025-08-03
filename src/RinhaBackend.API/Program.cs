@@ -10,6 +10,7 @@ using RinhaBackend.API.Factories;
 using RinhaBackend.API.Interfaces;
 using RinhaBackend.API.Services;
 using RinhaBackend.API.Services.Interfaces;
+using StackExchange.Redis;
 using JsonOptions = Microsoft.AspNetCore.Http.Json.JsonOptions;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -33,7 +34,7 @@ builder.Services.AddHttpClient<DefaultPaymentProcessor>("DefaultProcessor", clie
     var baseUrl = builder.Configuration["PROCESSOR_DEFAULT_URL"] ?? 
                   builder.Configuration["Processors:Default:BaseUrl"] ?? 
                   throw new InvalidOperationException(
-                      "PROCESSOR_DEFAULT_URL environment variable or Processors:Default:BaseUrl in appsettings.json must be set");
+                      "PROCESSOR_DEFAULT_URL environment variable or Processors:Default:BaseUrl must be set");
     
     client.BaseAddress = new Uri(baseUrl);
     client.Timeout = TimeSpan.FromSeconds(30);
@@ -44,7 +45,7 @@ builder.Services.AddHttpClient<FallbackPaymentProcessor>("FallbackProcessor", cl
     var baseUrl = builder.Configuration["PROCESSOR_FALLBACK_URL"] ?? 
                   builder.Configuration["Processors:Fallback:BaseUrl"] ?? 
                   throw new InvalidOperationException(
-                      "PROCESSOR_FALLBACK_URL environment variable or Processors:Fallback:BaseUrl in appsettings.json must be set");
+                      "PROCESSOR_FALLBACK_URL environment variable or Processors:Fallback:BaseUrl must be set");
     
     client.BaseAddress = new Uri(baseUrl);
     client.Timeout = TimeSpan.FromSeconds(30);
@@ -83,12 +84,10 @@ app.MapPost("payments", async (
     [FromServices] ILogger<Program> logger,
     [FromBody] CreatePaymentRequest request) =>
 {
-    var cacheKey = $"payment_corr:{request.CorrelationId}";
+    var cacheKey = $"payment:{request.CorrelationId}";
     
     if (localCache.TryGetValue(cacheKey, out _))
         return Results.Conflict($"Payment with id {request.CorrelationId} already exists");
-    
-    localCache.Set(cacheKey, true, TimeSpan.FromMinutes(10));
 
     var paymentId = Guid.CreateVersion7();
 
@@ -111,12 +110,26 @@ app.MapPost("payments", async (
                     CorrelationId = request.CorrelationId
                 };
                 
-                await paymentRepository.CreatePaymentAsync(payment);
+                var result = await paymentService.ProcessPaymentAsyncV2(payment);
                 
-                await paymentService.ProcessPendingPaymentAsync(payment.Id);
-                
-                logger.LogInformation("Payment {PaymentId} processed successfully for correlation {CorrelationId}", 
-                    paymentId, request.CorrelationId);
+                if (result.IsSuccess)
+                {
+                    payment.Status = result.Status;
+                    payment.ProcessorName = result.ProcessorName;
+                    await paymentRepository.CreatePaymentAsync(payment);
+                    
+                    logger.LogInformation("Payment {PaymentId} processed and saved successfully for correlation {CorrelationId}", 
+                        paymentId, request.CorrelationId);
+                    
+                    localCache.Set(cacheKey, true, TimeSpan.FromMinutes(10));
+                }
+                else
+                {
+                    logger.LogWarning("Payment {PaymentId} processing failed for correlation {CorrelationId}: {Error}", 
+                        paymentId, request.CorrelationId, result.ErrorMessage);
+                    
+                    // localCache.Remove(cacheKey);
+                }
             }
             catch (Exception ex)
             {
