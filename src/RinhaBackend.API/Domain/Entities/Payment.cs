@@ -1,6 +1,6 @@
-using RinhaBackend.API.Enums;
+using RinhaBackend.API.Domain.Enums;
 
-namespace RinhaBackend.API.Entities;
+namespace RinhaBackend.API.Domain.Entities;
 
 public class Payment
 {

@@ -1,4 +1,4 @@
-namespace RinhaBackend.API.Enums;
+namespace RinhaBackend.API.Domain.Enums;
 
 public enum PaymentProcessor
 {

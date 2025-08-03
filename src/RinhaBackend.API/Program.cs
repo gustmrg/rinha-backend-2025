@@ -2,9 +2,9 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using RinhaBackend.API.Configurations;
+using RinhaBackend.API.Domain.Entities;
+using RinhaBackend.API.Domain.Enums;
 using RinhaBackend.API.DTOs.Requests;
-using RinhaBackend.API.Entities;
-using RinhaBackend.API.Enums;
 using RinhaBackend.API.Extensions;
 using RinhaBackend.API.Services;
 using RinhaBackend.API.Services.Interfaces;
@@ -22,6 +22,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 builder.Services.AddRedis(builder.Configuration);
 
 builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
+builder.Services.AddScoped<IPaymentProcessingService, PaymentProcessingService>();
 
 builder.Services.AddHostedService<PaymentBackgroundService>();
 
@@ -61,11 +62,9 @@ app.MapPost("payments", async (
             using var scope = serviceProvider.CreateScope();
             var scopedCache = scope.ServiceProvider.GetRequiredService<ICacheService>();
             var scopedLogger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-
-            payment.Status = PaymentStatus.Succeeded;
-
-            await cache.RemoveAsync(cacheKey);
-            await scopedCache.TryAddAsync(cacheKey, payment, TimeSpan.FromMinutes(5));
+            var scopedPaymentProcessingService = scope.ServiceProvider.GetRequiredService<IPaymentProcessingService>();
+            
+            await scopedPaymentProcessingService.ProcessPayment(payment);
             
             scopedLogger.LogInformation("Payment processed successfully for correlation {CorrelationId}", request.CorrelationId);
         });

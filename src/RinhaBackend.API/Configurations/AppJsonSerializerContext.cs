@@ -1,5 +1,5 @@
 using System.Text.Json.Serialization;
-using RinhaBackend.API.Entities;
+using RinhaBackend.API.Domain.Entities;
 using StackExchange.Redis;
 
 namespace RinhaBackend.API.Configurations;
