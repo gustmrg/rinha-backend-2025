@@ -110,9 +110,19 @@ public class RedisCacheService : ICacheService
         }
     }
 
-    public Task RemoveAsync(string key)
+    public async Task RemoveAsync(string key)
     {
-        throw new NotImplementedException();
+        try
+        {
+            if (string.IsNullOrEmpty(key))
+                return;
+
+            await _database.KeyDeleteAsync(key);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error removing key {Key} from cache async", key);
+        }
     }
 
     public Task RemoveByPatternAsync(string pattern)
