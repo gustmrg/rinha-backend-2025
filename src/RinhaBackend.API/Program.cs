@@ -19,6 +19,16 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonSerializerContext.Default);
 });
 
+builder.Services.AddHttpClient<DefaultPaymentClient>(client => {
+    client.BaseAddress = new Uri("https://api.primary-processor.com/");
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
+
+// builder.Services.AddHttpClient<FallbackPaymentClient>(client => {
+//     client.BaseAddress = new Uri("https://api.fallback-processor.com/");
+//     client.Timeout = TimeSpan.FromSeconds(45);
+// });
+
 builder.Services.AddRedis(builder.Configuration);
 
 builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
@@ -60,13 +70,13 @@ app.MapPost("payments", async (
         await queue.QueueBackgroundWorkItemAsync(async (cancellationToken, serviceProvider) =>
         {
             using var scope = serviceProvider.CreateScope();
-            var scopedCache = scope.ServiceProvider.GetRequiredService<ICacheService>();
             var scopedLogger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
             var scopedPaymentProcessingService = scope.ServiceProvider.GetRequiredService<IPaymentProcessingService>();
             
             await scopedPaymentProcessingService.ProcessPayment(payment);
             
-            scopedLogger.LogInformation("Payment processed successfully for correlation {CorrelationId}", request.CorrelationId);
+            scopedLogger.LogInformation("Payment processed successfully for correlation {CorrelationId}", 
+                request.CorrelationId);
         });
     }
     catch (Exception ex)
