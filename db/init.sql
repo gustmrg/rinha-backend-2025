@@ -10,4 +10,4 @@ CREATE TABLE IF NOT EXISTS payments (
 CREATE INDEX IF NOT EXISTS idx_payments_correlation_id ON payments(correlation_id);
 CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
 CREATE INDEX IF NOT EXISTS idx_payments_requested_at ON payments(requested_at);
-CREATE INDEX IF NOT EXISTS idx_payments_created_processor ON payments(created_at, processor);
+CREATE INDEX IF NOT EXISTS idx_payments_created_processor ON payments(requested_at, processor);

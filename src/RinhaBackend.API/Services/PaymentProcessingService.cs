@@ -1,3 +1,4 @@
+using Npgsql;
 using RinhaBackend.API.Domain.Entities;
 using RinhaBackend.API.Domain.Enums;
 using RinhaBackend.API.Domain.Results;
@@ -41,6 +42,7 @@ public class PaymentProcessingService : IPaymentProcessingService
             if (response.IsSuccessStatusCode)
             {
                 payment.Status = PaymentStatus.Succeeded;
+                payment.PaymentProcessor = PaymentProcessor.Default;
                 usedProcessor = PaymentProcessor.Default;
             }
             else
@@ -58,6 +60,7 @@ public class PaymentProcessingService : IPaymentProcessingService
                 if (response.IsSuccessStatusCode)
                 {
                     payment.Status = PaymentStatus.Succeeded;
+                    payment.PaymentProcessor = PaymentProcessor.Fallback;
                     usedProcessor = PaymentProcessor.Fallback;
                 }
                 else
@@ -73,15 +76,19 @@ public class PaymentProcessingService : IPaymentProcessingService
                 return PaymentProcessingResult.Failure(ex.Message);
             }
         }
-        
+
         try
         {
             await _cache.RemoveAsync(cacheKey);
             await _cache.TryAddAsync(cacheKey, payment, TimeSpan.FromMinutes(5));
             await _paymentRepository.SavePaymentAsync(payment);
-            
+
             response?.Dispose();
             return PaymentProcessingResult.Success(payment.Status, usedProcessor);
+        }
+        catch (NpgsqlException ex)
+        {
+            return PaymentProcessingResult.Failure(ex.Message);
         }
         catch (Exception ex)
         {

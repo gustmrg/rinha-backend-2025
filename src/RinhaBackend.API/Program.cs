@@ -22,6 +22,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 
 builder.Services.AddHttpClientServices(builder.Configuration);
 builder.Services.AddRedis(builder.Configuration);
+builder.Services.AddDatabase();
 builder.Services.AddRepositories();
 builder.Services.AddServices();
 builder.Services.AddBackgroundServices();

@@ -17,6 +17,7 @@ services:
       - DB_CONNECTION_IDLE_LIFETIME=180 
       - PROCESSOR_DEFAULT_URL=http://payment-processor-default:8080
       - PROCESSOR_FALLBACK_URL=http://payment-processor-fallback:8080
+      - REDIS_CONNECTION_STRING=redis:6379
     networks:
       - rinha-network
       - payment-processor
@@ -81,6 +82,39 @@ services:
         reservations: 
           cpus: "0.1"
           memory: "80MB"
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: rinha_redis
+    hostname: redis
+    restart: always
+    ports:
+      - "6379:6379"
+    command: |
+      redis-server
+      --maxmemory 50mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+      --tcp-keepalive 60
+      --timeout 30
+    networks:
+      - rinha-network
+      - payment-processor
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: "60MB"
+        reservations:
+          cpus: "0.05"
+          memory: "40MB"
 
   nginx:
     image: nginx:1.27.0-alpine

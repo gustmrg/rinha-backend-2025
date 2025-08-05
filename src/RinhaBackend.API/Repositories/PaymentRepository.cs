@@ -23,8 +23,8 @@ public class PaymentRepository : IPaymentRepository
     public async Task SavePaymentAsync(Payment payment, CancellationToken cancellationToken = default)
     {
         const string sql = @"
-            INSERT INTO payments (payment_id, amount, status, requested_at, correlation_id)
-            VALUES (@Id, @Amount, @Status, @RequestedAt, @CorrelationId)";
+            INSERT INTO payments (payment_id, amount, status, requested_at, correlation_id, processor)
+            VALUES (@Id, @Amount, @Status, @RequestedAt, @CorrelationId, @PaymentProcessor)";
         
         using var connection = _connectionFactory.CreateConnection();
 
@@ -52,8 +52,8 @@ public class PaymentRepository : IPaymentRepository
                 COUNT(*) AS TotalRequests,
                 SUM(amount) AS TotalAmount
             FROM payments
-            WHERE created_at >= @From 
-              AND created_at <= @To
+            WHERE requested_at >= @From 
+              AND requested_at <= @To
             GROUP BY processor";
 
         var parameters = new { From = from, To = to };

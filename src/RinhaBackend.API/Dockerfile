@@ -1,23 +1,45 @@
-﻿FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS base
+﻿# Use a minimal runtime image for AOT applications
+FROM mcr.microsoft.com/dotnet/runtime-deps:9.0 AS base
 USER $APP_UID
 WORKDIR /app
 EXPOSE 8080
 EXPOSE 8081
 
+# Build stage with full SDK and native build tools
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+
+# Install native build tools required for AOT compilation
+RUN apt-get update && apt-get install -y \
+    clang \
+    zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
-COPY ["src/RinhaBackend.API/RinhaBackend.API.csproj", "src/RinhaBackend.API/"]
-RUN dotnet restore "src/RinhaBackend.API/RinhaBackend.API.csproj"
+
+# Copy the project file and restore dependencies
+COPY ["RinhaBackend.API.csproj", "."]
+RUN dotnet restore "RinhaBackend.API.csproj"
+
+# Copy the rest of the source code
 COPY . .
-WORKDIR "/src/src/RinhaBackend.API"
-RUN dotnet build "./RinhaBackend.API.csproj" -c $BUILD_CONFIGURATION -o /app/build
+
+# Build the application
+RUN dotnet build "RinhaBackend.API.csproj" -c $BUILD_CONFIGURATION -o /app/build
 
 FROM build AS publish
 ARG BUILD_CONFIGURATION=Release
-RUN dotnet publish "./RinhaBackend.API.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
+
+# Publish with AOT compilation
+RUN dotnet publish "RinhaBackend.API.csproj" \
+    -c $BUILD_CONFIGURATION \
+    -o /app/publish \
+    --self-contained true \
+    -p:PublishAot=true
 
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
-ENTRYPOINT ["dotnet", "RinhaBackend.API.dll"]
+
+# For AOT builds, the executable name matches your project name (without .dll)
+ENTRYPOINT ["./RinhaBackend.API"]
