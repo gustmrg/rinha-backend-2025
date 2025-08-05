@@ -26,4 +26,36 @@ public static class ServiceCollectionExtensions
 
         return services;
     }
+    
+    public static IServiceCollection AddHttpClientServices(this IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddHttpClient<DefaultPaymentClient>(client =>
+        {
+            var baseUrl = configuration["PROCESSOR_DEFAULT_URL"] ?? 
+                          configuration["Processors:Default:BaseUrl"] ?? 
+                          throw new InvalidOperationException(
+                              "PROCESSOR_DEFAULT_URL environment variable or Processors:Default:BaseUrl must be set");
+            client.BaseAddress = new Uri(baseUrl);
+            client.Timeout = TimeSpan.FromMilliseconds(500);
+        });
+
+        services.AddHttpClient<FallbackPaymentClient>(client =>
+        {
+            var baseUrl = configuration["PROCESSOR_FALLBACK_URL"] ?? 
+                          configuration["Processors:Fallback:BaseUrl"] ?? 
+                          throw new InvalidOperationException(
+                              "PROCESSOR_FALLBACK_URL environment variable or Processors:Fallback:BaseUrl must be set");
+            client.BaseAddress = new Uri(baseUrl);
+            client.Timeout = TimeSpan.FromMilliseconds(500);
+        });
+
+        return services;
+    }
+    
+    public static IServiceCollection AddBackgroundServices(this IServiceCollection services)
+    {
+        services.AddHostedService<PaymentBackgroundService>();
+
+        return services;
+    }
 }

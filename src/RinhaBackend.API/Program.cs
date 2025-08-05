@@ -11,6 +11,8 @@ using RinhaBackend.API.Services.Interfaces;
 
 var builder = WebApplication.CreateSlimBuilder(args);
 
+builder.WebHost.UseKestrelHttpsConfiguration();
+
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
@@ -19,22 +21,13 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonSerializerContext.Default);
 });
 
-builder.Services.AddHttpClient<DefaultPaymentClient>(client => {
-    client.BaseAddress = new Uri("https://api.primary-processor.com/");
-    client.Timeout = TimeSpan.FromSeconds(30);
-});
-
-// builder.Services.AddHttpClient<FallbackPaymentClient>(client => {
-//     client.BaseAddress = new Uri("https://api.fallback-processor.com/");
-//     client.Timeout = TimeSpan.FromSeconds(45);
-// });
-
+builder.Services.AddHttpClientServices(builder.Configuration);
 builder.Services.AddRedis(builder.Configuration);
 
 builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
 builder.Services.AddScoped<IPaymentProcessingService, PaymentProcessingService>();
 
-builder.Services.AddHostedService<PaymentBackgroundService>();
+builder.Services.AddBackgroundServices();
 
 var app = builder.Build();
 
