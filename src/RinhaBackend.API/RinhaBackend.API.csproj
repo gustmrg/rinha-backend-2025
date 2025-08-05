@@ -4,16 +4,31 @@
         <TargetFramework>net9.0</TargetFramework>
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
-        <UserSecretsId>219dead3-dba3-46b5-b0fc-f4bb2a8f4436</UserSecretsId>
+        <InvariantGlobalization>true</InvariantGlobalization>
+        <UserSecretsId>af4fe6c0-1a28-4749-8fd9-1a308d1bffcc</UserSecretsId>
+        <InterceptorsNamespaces>Dapper.AOT</InterceptorsNamespaces>
     </PropertyGroup>
 
+    <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+        <PublishAot>true</PublishAot>
+        <TrimMode>link</TrimMode>
+    </PropertyGroup>
+    
     <ItemGroup>
-        <PackageReference Include="Dapper" Version="2.1.66" />
-        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.7" />
-        <PackageReference Include="Npgsql" Version="9.0.3" />
-        <PackageReference Include="Polly" Version="8.6.2" />
-        <PackageReference Include="Polly.Extensions.Http" Version="3.0.0" />
-        <PackageReference Include="StackExchange.Redis" Version="2.8.58" />
+      <Content Include="..\..\.dockerignore">
+        <Link>.dockerignore</Link>
+      </Content>
+    </ItemGroup>
+
+    <ItemGroup>
+      <PackageReference Include="Dapper" Version="2.1.66" />
+      <PackageReference Include="Dapper.AOT" Version="1.0.48" />
+      <PackageReference Include="Npgsql" Version="9.0.3" />
+      <PackageReference Include="StackExchange.Redis" Version="2.8.58" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <Folder Include="Extensions\" />
     </ItemGroup>
 
 </Project>

@@ -1,179 +1,93 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Caching.Memory;
+using RinhaBackend.API.Configurations;
+using RinhaBackend.API.Domain.Entities;
+using RinhaBackend.API.Domain.Enums;
 using RinhaBackend.API.DTOs.Requests;
-using RinhaBackend.API.DTOs.Responses;
-using RinhaBackend.API.Entities;
-using RinhaBackend.API.Enums;
 using RinhaBackend.API.Extensions;
-using RinhaBackend.API.Factories;
-using RinhaBackend.API.Interfaces;
-using RinhaBackend.API.Services;
 using RinhaBackend.API.Services.Interfaces;
-using StackExchange.Redis;
-using JsonOptions = Microsoft.AspNetCore.Http.Json.JsonOptions;
 
-var builder = WebApplication.CreateBuilder(args);
-var configuration = builder.Configuration;
+var builder = WebApplication.CreateSlimBuilder(args);
 
-builder.Services.AddDatabase(configuration);
-builder.Services.AddMemoryCache();
+builder.WebHost.UseKestrelHttpsConfiguration();
 
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+    options.SerializerOptions.WriteIndented = false;
+    options.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+    options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonSerializerContext.Default);
 });
 
-builder.Services.Configure<JsonOptions>(options =>
-{
-    options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
-});
+builder.Services.AddHttpClientServices(builder.Configuration);
+builder.Services.AddRedis(builder.Configuration);
+builder.Services.AddDatabase();
+builder.Services.AddRepositories();
+builder.Services.AddServices();
+builder.Services.AddBackgroundServices();
 
-builder.Services.AddHttpClient<DefaultPaymentProcessor>("DefaultProcessor", client =>
-{
-    var baseUrl = builder.Configuration["PROCESSOR_DEFAULT_URL"] ?? 
-                  builder.Configuration["Processors:Default:BaseUrl"] ?? 
-                  throw new InvalidOperationException(
-                      "PROCESSOR_DEFAULT_URL environment variable or Processors:Default:BaseUrl must be set");
-    
-    client.BaseAddress = new Uri(baseUrl);
-    client.Timeout = TimeSpan.FromSeconds(30);
-});
-
-builder.Services.AddHttpClient<FallbackPaymentProcessor>("FallbackProcessor", client =>
-{
-    var baseUrl = builder.Configuration["PROCESSOR_FALLBACK_URL"] ?? 
-                  builder.Configuration["Processors:Fallback:BaseUrl"] ?? 
-                  throw new InvalidOperationException(
-                      "PROCESSOR_FALLBACK_URL environment variable or Processors:Fallback:BaseUrl must be set");
-    
-    client.BaseAddress = new Uri(baseUrl);
-    client.Timeout = TimeSpan.FromSeconds(30);
-});
-
-builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
-
-builder.Services.AddScoped<IPaymentProcessorFactory, PaymentProcessorFactory>();
-builder.Services.AddScoped<IPaymentProcessor, DefaultPaymentProcessor>();
-builder.Services.AddScoped<IPaymentProcessor, FallbackPaymentProcessor>();
-builder.Services.AddScoped<PaymentProcessingService>();
-builder.Services.AddScoped<PaymentDuplicateService>();
-
-builder.Services.AddHostedService<PaymentBackgroundService>();
-
-builder.Services.AddOpenApi();
-builder.Services.AddControllers()
-    .AddJsonOptions(options =>
-    {
-        options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
-    });;
+// Configure Dapper for AOT compatibility
+DapperAotConfiguration.Configure();
 
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
-{
-    app.MapOpenApi();
-}
-
-app.UseHttpsRedirection();
-
 app.MapPost("payments", async (
-    [FromServices] IMemoryCache localCache,
-    [FromServices] IBackgroundTaskQueue backgroundTaskQueue,
-    [FromServices] IPaymentRepository paymentRepository,
+    [FromServices] ICacheService cache,
+    [FromServices] IBackgroundTaskQueue queue,
     [FromServices] ILogger<Program> logger,
     [FromBody] CreatePaymentRequest request) =>
 {
     var cacheKey = $"payment:{request.CorrelationId}";
     
-    if (localCache.TryGetValue(cacheKey, out _))
-        return Results.Conflict($"Payment with id {request.CorrelationId} already exists");
+    if (await cache.ExistsAsync(cacheKey))
+    {
+        return Results.Conflict("Payment with this correlation ID already exists.");
+    }
+    
+    var payment = new Payment
+    {
+        Id = Guid.CreateVersion7(),
+        CorrelationId = request.CorrelationId,
+        Amount = request.Amount,
+        Status = PaymentStatus.Created,
+        RequestedAt = DateTime.UtcNow,
+    };
 
-    var paymentId = Guid.CreateVersion7();
+    await cache.TryAddAsync(
+        cacheKey,
+        payment,
+        TimeSpan.FromMinutes(5));
 
     try
-    {
-        await backgroundTaskQueue.QueueBackgroundWorkItemAsync(async (token, serviceProvider) =>
+    { 
+        await queue.QueueBackgroundWorkItemAsync(async (cancellationToken, serviceProvider) =>
         {
-            var paymentRepository = serviceProvider.GetRequiredService<IPaymentRepository>();
-            var paymentService = serviceProvider.GetRequiredService<PaymentProcessingService>();
-            var logger = serviceProvider.GetRequiredService<ILogger<PaymentProcessingService>>();
-
-            try
-            {
-                var payment = new Payment
-                {
-                    Id = paymentId,
-                    Amount = request.Amount,
-                    Status = PaymentStatus.Pending,
-                    RequestedAt = DateTime.UtcNow,
-                    CorrelationId = request.CorrelationId
-                };
-                
-                var result = await paymentService.ProcessPaymentAsyncV2(payment);
-                
-                if (result.IsSuccess)
-                {
-                    payment.Status = result.Status;
-                    payment.ProcessorName = result.ProcessorName;
-                    await paymentRepository.CreatePaymentAsync(payment);
-                    
-                    logger.LogInformation("Payment {PaymentId} processed and saved successfully for correlation {CorrelationId}", 
-                        paymentId, request.CorrelationId);
-                    
-                    localCache.Set(cacheKey, true, TimeSpan.FromMinutes(10));
-                }
-                else
-                {
-                    logger.LogWarning("Payment {PaymentId} processing failed for correlation {CorrelationId}: {Error}", 
-                        paymentId, request.CorrelationId, result.ErrorMessage);
-                    
-                    // localCache.Remove(cacheKey);
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Failed to process payment {PaymentId} for correlation {CorrelationId}", 
-                    paymentId, request.CorrelationId);
-                
-                localCache.Remove(cacheKey);
-            }
+            using var scope = serviceProvider.CreateScope();
+            var scopedLogger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+            var scopedPaymentProcessingService = scope.ServiceProvider.GetRequiredService<IPaymentProcessingService>();
+            
+            await scopedPaymentProcessingService.ProcessPayment(payment);
+            
+            scopedLogger.LogInformation("Payment processed successfully for correlation {CorrelationId}", 
+                request.CorrelationId);
         });
-        
-        logger.LogInformation("Payment {PaymentId} for correlation {CorrelationId} queued", 
-            paymentId, request.CorrelationId);
- 
-        return Results.Accepted();
     }
     catch (Exception ex)
     {
-        logger.LogError(ex, "Failed to create payment for correlation {CorrelationId}", request.CorrelationId);
-        return Results.InternalServerError(new { error = "Failed to create payment" });
+        logger.LogError(ex, "Failed to process payment for correlation {CorrelationId}", request.CorrelationId);
+                
+        await cache.RemoveAsync(cacheKey);
     }
+
+    return Results.Accepted();
 });
 
 app.MapGet("/payments-summary", async (
-    [FromServices] IPaymentRepository paymentRepository,
-    [FromServices] ILogger<Program> logger,
-    [FromQuery] DateTime from, DateTime to) =>
+    [FromServices] IPaymentProcessingService paymentProcessingService,
+    [FromQuery] DateTime to, DateTime from) =>
 {
-    var payments = (await paymentRepository.GetPaymentsAsync(from, to)).ToList();
-    
-    logger.LogInformation("Found {Count} payments. ProcessorNames: {ProcessorNames}", 
-        payments.Count, 
-        string.Join(", ", payments.Select(p => $"{p.Id}:{p.ProcessorName}").Distinct()));
-    
-    var defaultPayments = payments.Where(x => x.ProcessorName == PaymentProcessor.Default).ToList();
-    var fallbackPayments = payments.Where(x => x.ProcessorName == PaymentProcessor.Fallback).ToList();
-    
-    logger.LogInformation("Default payments: {DefaultCount}, Fallback payments: {FallbackCount}", 
-        defaultPayments.Count, fallbackPayments.Count);
-    
-    var response = new PaymentsSummaryResponse
-    {
-        Default = new PaymentSummary(defaultPayments.Count, defaultPayments.Sum(x => x.Amount)),
-        Fallback = new PaymentSummary(fallbackPayments.Count, fallbackPayments.Sum(x => x.Amount)),
-    };
+    var response = await paymentProcessingService.GetPaymentSummaryAsync(from, to);
     
     return Results.Ok(response);
 });

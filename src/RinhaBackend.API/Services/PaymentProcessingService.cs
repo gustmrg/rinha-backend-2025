@@ -1,275 +1,131 @@
-using RinhaBackend.API.Entities;
-using RinhaBackend.API.Enums;
-using RinhaBackend.API.Interfaces;
-using Polly;
-using Polly.Extensions.Http;
-using Polly.Timeout;
+using Npgsql;
+using RinhaBackend.API.Domain.Entities;
+using RinhaBackend.API.Domain.Enums;
+using RinhaBackend.API.Domain.Results;
+using RinhaBackend.API.DTOs;
+using RinhaBackend.API.DTOs.Responses;
+using RinhaBackend.API.Repositories.Interfaces;
+using RinhaBackend.API.Services.Interfaces;
 
 namespace RinhaBackend.API.Services;
 
-public class PaymentProcessingResult
+public class PaymentProcessingService : IPaymentProcessingService
 {
-    public bool IsSuccess { get; set; }
-    public PaymentStatus Status { get; set; }
-    public PaymentProcessor? ProcessorName { get; set; }
-    public string? ErrorMessage { get; set; }
-    
-    public static PaymentProcessingResult Success(PaymentStatus status, PaymentProcessor processorName)
-        => new() { IsSuccess = true, Status = status, ProcessorName = processorName };
-        
-    public static PaymentProcessingResult Failure(string errorMessage)
-        => new() { IsSuccess = false, Status = PaymentStatus.Failed, ErrorMessage = errorMessage };
-}
-
-public class PaymentProcessingService
-{
+    private readonly ICacheService _cache;
+    private readonly DefaultPaymentClient _defaultPaymentClient;
+    private readonly FallbackPaymentClient _fallbackPaymentClient;
     private readonly IPaymentRepository _paymentRepository;
-    private readonly IPaymentProcessorFactory _paymentProcessorFactory;
-    private readonly ILogger<PaymentProcessingService> _logger;
-    private readonly IAsyncPolicy<HttpResponseMessage> _fallbackPolicy;
-    private readonly PaymentDuplicateService _duplicateService;
 
     public PaymentProcessingService(
-        IPaymentRepository paymentRepository, 
-        IPaymentProcessorFactory paymentProcessorFactory, 
-        ILogger<PaymentProcessingService> logger, 
-        PaymentDuplicateService duplicateService)
+        ICacheService cache,
+        DefaultPaymentClient defaultPaymentClient,
+        FallbackPaymentClient fallbackPaymentClient,
+        IPaymentRepository paymentRepository)
     {
+        _cache = cache;
+        _defaultPaymentClient = defaultPaymentClient;
+        _fallbackPaymentClient = fallbackPaymentClient;
         _paymentRepository = paymentRepository;
-        _paymentProcessorFactory = paymentProcessorFactory;
-        _logger = logger;
-        _duplicateService = duplicateService;
-        _fallbackPolicy = CreateFallbackPolicy();
     }
 
-    public async Task<PaymentProcessingResult> ProcessPaymentAsyncV2(Payment payment)
+    public async Task<PaymentProcessingResult> ProcessPayment(Payment payment)
     {
+        var cacheKey = $"payment:{payment.CorrelationId}";
+        
+        HttpResponseMessage? response = null;
+        PaymentProcessor usedProcessor = PaymentProcessor.Default;
+        
         try
         {
-            _logger.LogInformation("Processing new payment {PaymentId} for correlation {CorrelationId}", 
-                payment.Id, payment.CorrelationId);
+            response = await _defaultPaymentClient.PostPaymentAsync(payment);
             
-            var paymentExists = await _duplicateService.PaymentExistsAsync(payment.CorrelationId);
-            
-            if (paymentExists)
+            if (response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Payment with correlation {CorrelationId} already exists", payment.CorrelationId);
-                return PaymentProcessingResult.Failure("Payment with the same correlation ID already exists");
+                payment.Status = PaymentStatus.Succeeded;
+                payment.PaymentProcessor = PaymentProcessor.Default;
+                usedProcessor = PaymentProcessor.Default;
             }
-            
-            return await ProcessPaymentWithPoliciesV2(payment);
+            else
+            {
+                throw new HttpRequestException($"Default payment client failed with status code: {response.StatusCode}");
+            }
+        }
+        catch (Exception)
+        {
+            try
+            {
+                response?.Dispose();
+                response = await _fallbackPaymentClient.PostPaymentAsync(payment);
+                
+                if (response.IsSuccessStatusCode)
+                {
+                    payment.Status = PaymentStatus.Succeeded;
+                    payment.PaymentProcessor = PaymentProcessor.Fallback;
+                    usedProcessor = PaymentProcessor.Fallback;
+                }
+                else
+                {
+                    throw new HttpRequestException($"Fallback payment client failed with status code: {response.StatusCode}");
+                }
+            }
+            catch (Exception ex)
+            {
+                response?.Dispose();
+                payment.Status = PaymentStatus.Failed;
+                await _cache.RemoveAsync(cacheKey);
+                return PaymentProcessingResult.Failure(ex.Message);
+            }
+        }
+
+        try
+        {
+            await _cache.RemoveAsync(cacheKey);
+            await _cache.TryAddAsync(cacheKey, payment, TimeSpan.FromMinutes(5));
+            await _paymentRepository.SavePaymentAsync(payment);
+
+            response?.Dispose();
+            return PaymentProcessingResult.Success(payment.Status, usedProcessor);
+        }
+        catch (NpgsqlException ex)
+        {
+            return PaymentProcessingResult.Failure(ex.Message);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error processing new payment {PaymentId}", payment.Id);
+            response?.Dispose();
+            await _cache.RemoveAsync(cacheKey);
             return PaymentProcessingResult.Failure(ex.Message);
         }
     }
 
-    public async ValueTask ProcessPendingPaymentAsync(Guid paymentId)
+    public async Task<PaymentSummaryResponse> GetPaymentSummaryAsync(DateTime from, DateTime to)
     {
-        try
+        var summaries = await _paymentRepository.GetPaymentSummaryAsync(from, to);
+        
+        var response = new PaymentSummaryResponse();
+        
+        foreach (var summary in summaries)
         {
-            _logger.LogInformation("Processing payment {PaymentId}", paymentId);
-        
-            var payment = await _paymentRepository.GetPaymentByIdAsync(paymentId);
-        
-            if (payment == null)
+            var processorSummary = new ProcessorSummary
             {
-                _logger.LogWarning("Payment {PaymentId} not found", paymentId);
-                return;
-            }
+                TotalRequests = summary.TotalRequests,
+                TotalAmount = summary.TotalAmount
+            };
             
-            var paymentExists = await _duplicateService.PaymentExistsAsync(payment.CorrelationId);
-
-            if (paymentExists)
+            switch (summary.Processor)
             {
-                _logger.LogWarning("Payment {PaymentId} already exists", paymentId);
-                return;
-            }
-        
-            if (payment.Status != PaymentStatus.Pending)
-            {
-                _logger.LogInformation("Payment {PaymentId} already processed with status {Status}", 
-                    paymentId, payment.Status);
-                return;
-            }
-        
-            await ProcessPaymentWithPolicies(payment, paymentId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error processing payment {PaymentId}", paymentId);
-            
-            var payment = await _paymentRepository.GetPaymentByIdAsync(paymentId);
-            if (payment != null)
-            {
-                await UpdatePaymentStatus(payment, PaymentStatus.Failed);
+                case PaymentProcessor.Default:
+                    response.Default = processorSummary;
+                    break;
+                case PaymentProcessor.Fallback:
+                    response.Fallback = processorSummary;
+                    break;
             }
         }
-    }
-    
-    private async Task UpdatePaymentStatus(Payment payment, PaymentStatus status)
-    {
-        try
-        {
-            payment.Status = status;
- 
-            await _paymentRepository.UpdatePaymentAsync(payment);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to update payment {PaymentId} status to {Status}", 
-                payment.Id, status);
-        }
-    }
-    
-    private async Task<PaymentProcessingResult> ProcessPaymentWithPoliciesV2(Payment payment)
-    {
-        var context = new Context($"payment-{payment.Id}");
-        context["payment"] = payment;
         
-        try
-        {
-            var policy = CreateFallbackPolicyV2();
-            var result = await policy.ExecuteAsync(async (ctx) => 
-            {
-                _logger.LogDebug("Using default processor for payment {PaymentId}", payment.Id);
-                
-                var paymentProcessor = _paymentProcessorFactory.Create("default");
-                await paymentProcessor.ProcessPaymentAsync(payment);
-                
-                _logger.LogInformation("Payment {PaymentId} processed successfully using default processor", payment.Id);
-                
-                return PaymentProcessingResult.Success(PaymentStatus.Completed, PaymentProcessor.Default);
-            }, context);
-            
-            return result;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error processing payment {PaymentId} with policies", payment.Id);
-            return PaymentProcessingResult.Failure(ex.Message);
-        }
-    }
+        response.Default ??= new ProcessorSummary { TotalRequests = 0, TotalAmount = 0 };
+        response.Fallback ??= new ProcessorSummary { TotalRequests = 0, TotalAmount = 0 };
 
-    private async Task ProcessPaymentWithPolicies(Payment payment, Guid paymentId)
-    {
-        var context = new Context($"payment-{paymentId}");
-        context["payment"] = payment;
-        
-        await _fallbackPolicy.ExecuteAsync(async (ctx) => 
-        {
-            _logger.LogDebug("Using default processor for payment {PaymentId}", paymentId);
-            
-            var paymentProcessor = _paymentProcessorFactory.Create("default");
-            await paymentProcessor.ProcessPaymentAsync(payment);
-            
-            payment.ProcessorName = PaymentProcessor.Default;
-            
-            await UpdatePaymentStatus(payment, PaymentStatus.Completed);
-            
-            _logger.LogInformation("Payment {PaymentId} processed successfully using default processor", paymentId);
-                
-            return new HttpResponseMessage(System.Net.HttpStatusCode.OK);
-        }, context);
-    }
-    
-    private async Task<PaymentProcessingResult> CallFallbackProcessorNew(Context context)
-    {
-        var payment = (Payment)context["payment"];
-        
-        _logger.LogInformation("Calling fallback processor for payment {PaymentId}", payment.Id);
-        
-        var fallbackProcessor = _paymentProcessorFactory.Create("fallback");
-        await fallbackProcessor.ProcessPaymentAsync(payment);
-        
-        _logger.LogInformation("Payment {PaymentId} processed successfully using fallback processor", payment.Id);
-        
-        return PaymentProcessingResult.Success(PaymentStatus.Completed, PaymentProcessor.Fallback);
-    }
-
-    private async Task<HttpResponseMessage> CallFallbackProcessor(Context context)
-    {
-        var payment = (Payment)context["payment"];
-        
-        _logger.LogInformation("Calling fallback processor for payment {PaymentId}", payment.Id);
-        
-        var fallbackProcessor = _paymentProcessorFactory.Create("fallback");
-        await fallbackProcessor.ProcessPaymentAsync(payment);
-        
-        payment.ProcessorName = PaymentProcessor.Fallback;
-        
-        await UpdatePaymentStatus(payment, PaymentStatus.Completed);
-        
-        _logger.LogInformation("Payment {PaymentId} processed successfully using fallback processor", payment.Id);
-        
-        return new HttpResponseMessage(System.Net.HttpStatusCode.OK);
-    }
-    
-    private IAsyncPolicy<PaymentProcessingResult> CreateFallbackPolicyV2()
-    {
-        var timeoutPolicy = Policy.TimeoutAsync<PaymentProcessingResult>(TimeSpan.FromSeconds(10));
-
-        var retryPolicyDefault = Policy
-            .HandleResult<PaymentProcessingResult>(r => !r.IsSuccess)
-            .Or<Exception>()
-            .WaitAndRetryAsync(
-                retryCount: 1,
-                sleepDurationProvider: retryAttempt => TimeSpan.FromSeconds(2),
-                onRetry: (outcome, timespan, retryCount, context) =>
-                {
-                    _logger.LogWarning("Tentando DEFAULT novamente. Tentativa: {RetryCount}", retryCount);
-                });
-
-        var fallbackPolicy = Policy
-            .HandleResult<PaymentProcessingResult>(r => !r.IsSuccess)
-            .Or<Exception>()
-            .FallbackAsync(
-                fallbackAction: async (context, cancellationToken) =>
-                {
-                    _logger.LogWarning("DEFAULT falhou, tentando FALLBACK...");
-                    return await CallFallbackProcessorNew(context);
-                },
-                onFallbackAsync: async (result, context) =>
-                {
-                    _logger.LogInformation("Executando fallback para processador FALLBACK");
-                    await Task.CompletedTask;
-                });
-
-        return Policy.WrapAsync(retryPolicyDefault, fallbackPolicy, timeoutPolicy);
-    }
-
-    private IAsyncPolicy<HttpResponseMessage> CreateFallbackPolicy()
-    {
-        var timeoutPolicy = Policy.TimeoutAsync<HttpResponseMessage>(TimeSpan.FromSeconds(10));
-
-        var retryPolicyDefault = HttpPolicyExtensions
-            .HandleTransientHttpError()
-            .Or<TimeoutRejectedException>()
-            .WaitAndRetryAsync(
-                retryCount: 1,
-                sleepDurationProvider: retryAttempt => TimeSpan.FromSeconds(2),
-                onRetry: (outcome, timespan, retryCount, context) =>
-                {
-                    _logger.LogWarning("Tentando DEFAULT novamente. Tentativa: {RetryCount}", retryCount);
-                });
-
-        var fallbackPolicy = HttpPolicyExtensions
-            .HandleTransientHttpError()
-            .Or<TimeoutRejectedException>()
-            .FallbackAsync(
-                fallbackAction: async (context, cancellationToken) =>
-                {
-                    _logger.LogWarning("DEFAULT falhou, tentando FALLBACK...");
-                    return await CallFallbackProcessor(context);
-                },
-                onFallbackAsync: async (result, context) =>
-                {
-                    _logger.LogInformation("Executando fallback para processador FALLBACK");
-                    await Task.CompletedTask;
-                });
-
-        return Policy.WrapAsync(retryPolicyDefault, fallbackPolicy, timeoutPolicy);
+        return response;
     }
 }

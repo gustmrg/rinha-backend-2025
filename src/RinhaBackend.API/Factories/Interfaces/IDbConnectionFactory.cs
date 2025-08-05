@@ -1,6 +1,6 @@
 using System.Data;
 
-namespace RinhaBackend.API.Interfaces;
+namespace RinhaBackend.API.Factories.Interfaces;
 
 public interface IDbConnectionFactory
 {

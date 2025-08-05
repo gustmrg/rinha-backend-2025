@@ -1,6 +1,6 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RinhaBackend.API", "src\RinhaBackend.API\RinhaBackend.API.csproj", "{D815F941-887B-45BB-878D-4E2C71BD9C77}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RinhaBackend.API", "src\RinhaBackend.API\RinhaBackend.API.csproj", "{429D5151-E1C7-4590-A74A-033B5CC7B07A}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -8,9 +8,9 @@ Global
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{D815F941-887B-45BB-878D-4E2C71BD9C77}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{D815F941-887B-45BB-878D-4E2C71BD9C77}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{D815F941-887B-45BB-878D-4E2C71BD9C77}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{D815F941-887B-45BB-878D-4E2C71BD9C77}.Release|Any CPU.Build.0 = Release|Any CPU
+		{429D5151-E1C7-4590-A74A-033B5CC7B07A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{429D5151-E1C7-4590-A74A-033B5CC7B07A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{429D5151-E1C7-4590-A74A-033B5CC7B07A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{429D5151-E1C7-4590-A74A-033B5CC7B07A}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

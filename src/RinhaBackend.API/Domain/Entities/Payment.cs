@@ -1,6 +1,6 @@
-using RinhaBackend.API.Enums;
+using RinhaBackend.API.Domain.Enums;
 
-namespace RinhaBackend.API.Entities;
+namespace RinhaBackend.API.Domain.Entities;
 
 public class Payment
 {
@@ -9,5 +9,5 @@ public class Payment
     public PaymentStatus Status { get; set; }
     public DateTime RequestedAt { get; set; }
     public Guid CorrelationId { get; set; }
-    public PaymentProcessor? ProcessorName { get; set; }
+    public PaymentProcessor PaymentProcessor { get; set; }
 }

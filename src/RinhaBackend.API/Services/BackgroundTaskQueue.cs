@@ -11,12 +11,12 @@ public class BackgroundTaskQueue : IBackgroundTaskQueue
     {
         var options = new BoundedChannelOptions(capacity)
         {
-            FullMode = BoundedChannelFullMode.Wait
+            FullMode = BoundedChannelFullMode.DropNewest
         };
         
         _queue = Channel.CreateBounded<Func<CancellationToken, IServiceProvider, ValueTask>>(options);
     }
-    
+
     public async ValueTask QueueBackgroundWorkItemAsync(Func<CancellationToken, IServiceProvider, ValueTask> workItem)
     {
         if (workItem == null)

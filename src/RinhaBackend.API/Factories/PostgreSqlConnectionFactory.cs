@@ -1,6 +1,6 @@
 using System.Data;
 using Npgsql;
-using RinhaBackend.API.Interfaces;
+using RinhaBackend.API.Factories.Interfaces;
 
 namespace RinhaBackend.API.Factories;
 
@@ -36,9 +36,9 @@ public class PostgreSqlConnectionFactory : IDbConnectionFactory
             ApplicationName = "RinhaBackend"
         };
         
-        _connectionString = builder.ToString();
+        _connectionString = builder.ToString();    
     }
-
+    
     public async Task<IDbConnection> CreateConnectionAsync()
     {
         var connection = new NpgsqlConnection(_connectionString);
