@@ -4,9 +4,10 @@ CREATE TABLE IF NOT EXISTS payments (
     status INT NOT NULL,
     correlation_id UUID NOT NULL,
     requested_at TIMESTAMP NOT NULL, 
-    processor_name INT
+    processor INT
 );
 
 CREATE INDEX IF NOT EXISTS idx_payments_correlation_id ON payments(correlation_id);
 CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
 CREATE INDEX IF NOT EXISTS idx_payments_requested_at ON payments(requested_at);
+CREATE INDEX IF NOT EXISTS idx_payments_created_processor ON payments(created_at, processor);

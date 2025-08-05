@@ -6,9 +6,6 @@ using RinhaBackend.API.Domain.Entities;
 using RinhaBackend.API.Domain.Enums;
 using RinhaBackend.API.DTOs.Requests;
 using RinhaBackend.API.Extensions;
-using RinhaBackend.API.Repositories;
-using RinhaBackend.API.Repositories.Interfaces;
-using RinhaBackend.API.Services;
 using RinhaBackend.API.Services.Interfaces;
 
 var builder = WebApplication.CreateSlimBuilder(args);
@@ -80,6 +77,15 @@ app.MapPost("payments", async (
     }
 
     return Results.Accepted();
+});
+
+app.MapGet("/payments-summary", async (
+    [FromServices] IPaymentProcessingService paymentProcessingService,
+    [FromQuery] DateTime to, DateTime from) =>
+{
+    var response = await paymentProcessingService.GetPaymentSummaryAsync(from, to);
+    
+    return Results.Ok(response);
 });
 
 app.Run();

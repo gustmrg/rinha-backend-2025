@@ -1,12 +1,78 @@
+using Dapper;
+using Npgsql;
+using RinhaBackend.API.Domain.Aggregates;
 using RinhaBackend.API.Domain.Entities;
+using RinhaBackend.API.Factories.Interfaces;
 using RinhaBackend.API.Repositories.Interfaces;
 
 namespace RinhaBackend.API.Repositories;
 
 public class PaymentRepository : IPaymentRepository
 {
+    private readonly IDbConnectionFactory _connectionFactory;
+    private readonly ILogger<PaymentRepository> _logger;
+
+    public PaymentRepository(
+        IDbConnectionFactory connectionFactory,
+        ILogger<PaymentRepository> logger)
+    {
+        _connectionFactory = connectionFactory;
+        _logger = logger;
+    }
+
     public async Task SavePaymentAsync(Payment payment, CancellationToken cancellationToken = default)
     {
-        await Task.CompletedTask;
+        const string sql = @"
+            INSERT INTO payments (payment_id, amount, status, requested_at, correlation_id)
+            VALUES (@Id, @Amount, @Status, @RequestedAt, @CorrelationId)";
+        
+        using var connection = _connectionFactory.CreateConnection();
+
+        try
+        {
+            await connection.ExecuteAsync(sql, payment);
+        }
+        catch (NpgsqlException ex) when (ex.Message.Contains("timeout"))
+        {
+            _logger.LogError(ex, "Database timeout occurred during SavePaymentAsync");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error during SavePaymentAsync");
+            throw;
+        }
+    }
+
+    public async Task<IEnumerable<PaymentSummary>> GetPaymentSummaryAsync(DateTime from, DateTime to)
+    {
+        const string query = @"
+            SELECT 
+                processor AS Processor,
+                COUNT(*) AS TotalRequests,
+                SUM(amount) AS TotalAmount
+            FROM payments
+            WHERE created_at >= @From 
+              AND created_at <= @To
+            GROUP BY processor";
+
+        var parameters = new { From = from, To = to };
+        
+        using var connection = _connectionFactory.CreateConnection();
+
+        try
+        {
+            return await connection.QueryAsync<PaymentSummary>(query, parameters);
+        }
+        catch (NpgsqlException ex) when (ex.Message.Contains("timeout"))
+        {
+            _logger.LogError(ex, "Database timeout occurred during GetPaymentsAsync");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error during GetPaymentsAsync");
+            throw;
+        }
     }
 }

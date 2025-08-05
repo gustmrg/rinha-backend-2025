@@ -1,3 +1,5 @@
+using RinhaBackend.API.Factories;
+using RinhaBackend.API.Factories.Interfaces;
 using RinhaBackend.API.Repositories;
 using RinhaBackend.API.Repositories.Interfaces;
 using RinhaBackend.API.Services;
@@ -73,6 +75,13 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddServices(this IServiceCollection services)
     {
         services.AddScoped<IPaymentProcessingService, PaymentProcessingService>();
+
+        return services;
+    }
+
+    public static IServiceCollection AddDatabase(this IServiceCollection services)
+    {
+        services.AddSingleton<IDbConnectionFactory, PostgreSqlConnectionFactory>();
 
         return services;
     }

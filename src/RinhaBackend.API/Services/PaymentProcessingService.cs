@@ -1,6 +1,8 @@
 using RinhaBackend.API.Domain.Entities;
 using RinhaBackend.API.Domain.Enums;
 using RinhaBackend.API.Domain.Results;
+using RinhaBackend.API.DTOs;
+using RinhaBackend.API.DTOs.Responses;
 using RinhaBackend.API.Repositories.Interfaces;
 using RinhaBackend.API.Services.Interfaces;
 
@@ -87,5 +89,36 @@ public class PaymentProcessingService : IPaymentProcessingService
             await _cache.RemoveAsync(cacheKey);
             return PaymentProcessingResult.Failure(ex.Message);
         }
+    }
+
+    public async Task<PaymentSummaryResponse> GetPaymentSummaryAsync(DateTime from, DateTime to)
+    {
+        var summaries = await _paymentRepository.GetPaymentSummaryAsync(from, to);
+        
+        var response = new PaymentSummaryResponse();
+        
+        foreach (var summary in summaries)
+        {
+            var processorSummary = new ProcessorSummary
+            {
+                TotalRequests = summary.TotalRequests,
+                TotalAmount = summary.TotalAmount
+            };
+            
+            switch (summary.Processor)
+            {
+                case PaymentProcessor.Default:
+                    response.Default = processorSummary;
+                    break;
+                case PaymentProcessor.Fallback:
+                    response.Fallback = processorSummary;
+                    break;
+            }
+        }
+        
+        response.Default ??= new ProcessorSummary { TotalRequests = 0, TotalAmount = 0 };
+        response.Fallback ??= new ProcessorSummary { TotalRequests = 0, TotalAmount = 0 };
+
+        return response;
     }
 }
