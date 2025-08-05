@@ -1,3 +1,5 @@
+using RinhaBackend.API.Repositories;
+using RinhaBackend.API.Repositories.Interfaces;
 using RinhaBackend.API.Services;
 using RinhaBackend.API.Services.Interfaces;
 using StackExchange.Redis;
@@ -54,7 +56,23 @@ public static class ServiceCollectionExtensions
     
     public static IServiceCollection AddBackgroundServices(this IServiceCollection services)
     {
+        services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
+        
         services.AddHostedService<PaymentBackgroundService>();
+
+        return services;
+    }
+
+    public static IServiceCollection AddRepositories(this IServiceCollection services)
+    {
+        services.AddScoped<IPaymentRepository, PaymentRepository>();
+
+        return services;
+    }
+    
+    public static IServiceCollection AddServices(this IServiceCollection services)
+    {
+        services.AddScoped<IPaymentProcessingService, PaymentProcessingService>();
 
         return services;
     }

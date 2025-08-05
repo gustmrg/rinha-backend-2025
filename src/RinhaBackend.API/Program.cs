@@ -6,6 +6,8 @@ using RinhaBackend.API.Domain.Entities;
 using RinhaBackend.API.Domain.Enums;
 using RinhaBackend.API.DTOs.Requests;
 using RinhaBackend.API.Extensions;
+using RinhaBackend.API.Repositories;
+using RinhaBackend.API.Repositories.Interfaces;
 using RinhaBackend.API.Services;
 using RinhaBackend.API.Services.Interfaces;
 
@@ -23,10 +25,8 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 
 builder.Services.AddHttpClientServices(builder.Configuration);
 builder.Services.AddRedis(builder.Configuration);
-
-builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
-builder.Services.AddScoped<IPaymentProcessingService, PaymentProcessingService>();
-
+builder.Services.AddRepositories();
+builder.Services.AddServices();
 builder.Services.AddBackgroundServices();
 
 var app = builder.Build();
