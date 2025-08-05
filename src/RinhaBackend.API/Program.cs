@@ -27,6 +27,9 @@ builder.Services.AddRepositories();
 builder.Services.AddServices();
 builder.Services.AddBackgroundServices();
 
+// Configure Dapper for AOT compatibility
+DapperAotConfiguration.Configure();
+
 var app = builder.Build();
 
 app.MapPost("payments", async (

@@ -1,7 +1,10 @@
+using System.Data;
 using Dapper;
 using Npgsql;
 using RinhaBackend.API.Domain.Aggregates;
 using RinhaBackend.API.Domain.Entities;
+using RinhaBackend.API.Domain.Enums;
+using RinhaBackend.API.DTOs;
 using RinhaBackend.API.Factories.Interfaces;
 using RinhaBackend.API.Repositories.Interfaces;
 
@@ -20,17 +23,28 @@ public class PaymentRepository : IPaymentRepository
         _logger = logger;
     }
 
+    [DapperAot]
     public async Task SavePaymentAsync(Payment payment, CancellationToken cancellationToken = default)
     {
         const string sql = @"
-            INSERT INTO payments (payment_id, amount, status, requested_at, correlation_id, processor)
-            VALUES (@Id, @Amount, @Status, @RequestedAt, @CorrelationId, @PaymentProcessor)";
+        INSERT INTO payments (payment_id, amount, status, requested_at, correlation_id, processor)
+        VALUES (@Id, @Amount, @Status, @RequestedAt, @CorrelationId, @PaymentProcessor)";
         
         using var connection = _connectionFactory.CreateConnection();
 
         try
         {
-            await connection.ExecuteAsync(sql, payment);
+            var parameters = new
+            {
+                Id = payment.Id,
+                Amount = payment.Amount,
+                Status = (int)payment.Status,
+                RequestedAt = payment.RequestedAt,
+                CorrelationId = payment.CorrelationId,
+                PaymentProcessor = (int)payment.PaymentProcessor
+            };
+            
+            await connection.ExecuteAsync(sql, parameters);
         }
         catch (NpgsqlException ex) when (ex.Message.Contains("timeout"))
         {
@@ -44,6 +58,7 @@ public class PaymentRepository : IPaymentRepository
         }
     }
 
+    [DapperAot]
     public async Task<IEnumerable<PaymentSummary>> GetPaymentSummaryAsync(DateTime from, DateTime to)
     {
         const string query = @"
@@ -62,7 +77,14 @@ public class PaymentRepository : IPaymentRepository
 
         try
         {
-            return await connection.QueryAsync<PaymentSummary>(query, parameters);
+            var results = await connection.QueryAsync<PaymentSummaryDto>(query, parameters);
+        
+            return results.Select(dto => new PaymentSummary
+            {
+                Processor = (PaymentProcessor)dto.Processor,
+                TotalRequests = dto.TotalRequests,
+                TotalAmount = dto.TotalAmount
+            });
         }
         catch (NpgsqlException ex) when (ex.Message.Contains("timeout"))
         {

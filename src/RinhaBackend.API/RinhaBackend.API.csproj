@@ -6,10 +6,12 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <InvariantGlobalization>true</InvariantGlobalization>
         <UserSecretsId>af4fe6c0-1a28-4749-8fd9-1a308d1bffcc</UserSecretsId>
+        <InterceptorsNamespaces>Dapper.AOT</InterceptorsNamespaces>
     </PropertyGroup>
 
     <PropertyGroup Condition="'$(Configuration)' == 'Release'">
         <PublishAot>true</PublishAot>
+        <TrimMode>link</TrimMode>
     </PropertyGroup>
     
     <ItemGroup>
@@ -20,6 +22,7 @@
 
     <ItemGroup>
       <PackageReference Include="Dapper" Version="2.1.66" />
+      <PackageReference Include="Dapper.AOT" Version="1.0.48" />
       <PackageReference Include="Npgsql" Version="9.0.3" />
       <PackageReference Include="StackExchange.Redis" Version="2.8.58" />
     </ItemGroup>

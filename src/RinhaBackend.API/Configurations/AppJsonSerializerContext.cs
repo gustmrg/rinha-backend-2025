@@ -12,7 +12,9 @@ namespace RinhaBackend.API.Configurations;
 
 [JsonSerializable(typeof(Payment))]
 [JsonSerializable(typeof(PaymentStatus))]
+[JsonSerializable(typeof(PaymentStatus?))]
 [JsonSerializable(typeof(PaymentProcessor))]
+[JsonSerializable(typeof(PaymentProcessor?))]
 [JsonSerializable(typeof(PaymentProcessingResult))]
 [JsonSerializable(typeof(PaymentSummary))]
 [JsonSerializable(typeof(ProcessorSummary))]
@@ -21,6 +23,7 @@ namespace RinhaBackend.API.Configurations;
 [JsonSerializable(typeof(PaymentSummaryResponse))]
 [JsonSerializable(typeof(string))]
 [JsonSerializable(typeof(RedisValue))]
+[JsonSerializable(typeof(IEnumerable<PaymentSummary>))]
 internal partial class AppJsonSerializerContext : JsonSerializerContext
 {
 }

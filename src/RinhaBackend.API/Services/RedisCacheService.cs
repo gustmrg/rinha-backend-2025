@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using RinhaBackend.API.Configurations;
 using RinhaBackend.API.Services.Interfaces;
 using StackExchange.Redis;
 
@@ -22,9 +23,7 @@ public class RedisCacheService : ICacheService
         
         _jsonOptions = new JsonSerializerOptions
         {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            WriteIndented = false,
-            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+            TypeInfoResolver = AppJsonSerializerContext.Default
         };
     }
     
